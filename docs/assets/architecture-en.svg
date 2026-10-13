@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1084" viewBox="0 0 1280 1084" fill="none" role="img" aria-labelledby="title description">
+  <title id="title">TorchTurbo architecture</title>
+  <desc id="description">The adapter layer integrates LlamaFactory and ms-swift with TorchTurboEngine without changing framework source code and supports additional adapters. Models preserve the original Hugging Face Transformers implementations and integrate through non-invasive TurboModel or TurboVLMModel wrappers. The algorithm-agnostic engine orchestrates model and optimizer preparation, resolves model-default parallel plans with runtime overrides, and delegates execution to a pluggable backend. Training algorithms are managed by the calling frameworks. FSDP2 is the current backend, combining fully sharded data parallelism, expert parallelism, and Ulysses sequence parallelism with DTensor. It supports MoE-aware prefetching and distributed checkpoint save/load. Optional memory optimizations include chunked LM loss, optimizer-state swapping for AdamW and Muon, and CPU offload. Other backends can be added. The foundation includes device runtimes, optimized operators, and PyTorch.</desc>
+  <defs>
+    <style>
+      text { font-family: Arial, Helvetica, sans-serif; }
+      .heading { font-size: 28px; font-weight: 700; fill: #26354a; }
+      .item { font-size: 22px; font-weight: 600; fill: #334358; }
+      .body { font-size: 20px; font-weight: 400; fill: #4d5c6f; }
+      .note { font-size: 18px; font-weight: 400; fill: #5f6d80; }
+      .eyebrow { font-size: 18px; font-weight: 600; letter-spacing: 1.2px; fill: #68768a; }
+      .design-badge { fill: none; stroke: #4d5c6f; stroke-opacity: 0.3; stroke-width: 1; }
+      .design-label { font-size: 18px; font-weight: 600; fill: #4d5c6f; }
+      #model .subtitle { fill: #6a6083; }
+      #parallel-plan .subtitle { fill: #83694e; }
+      #engine .heading { fill: #0958d9; }
+      #engine .body { fill: #425e80; }
+      #fsdp2-backend .implementation { fill: #2d6a60; }
+      .inline-separator { stroke: #c2cbd8; stroke-width: 1.25; }
+      .connector { stroke: #96a3b5; stroke-width: 2; stroke-linecap: round; marker-end: url(#arrow); }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+      <path d="M1 1 9 5 1 9" fill="none" stroke="#96a3b5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <rect width="1280" height="1084" rx="24" fill="#ffffff"/>
+
+  <g id="header">
+    <rect x="48" y="38" width="6" height="44" rx="3" fill="#1677ff"/>
+    <text x="76" y="72" font-size="42" font-weight="700" letter-spacing="-1.3" fill="#26354a">Torch<tspan fill="#1677ff">Turbo</tspan></text>
+    <text x="1204" y="64" text-anchor="end" class="eyebrow">ARCHITECTURE</text>
+    <text x="76" y="107" class="body">SuperNode-native post-training engine</text>
+  </g>
+
+  <g id="frameworks">
+    <rect x="48" y="142" width="1184" height="64" rx="14" fill="#f6f8fb" stroke="#dfe5ed"/>
+    <text x="76" y="182" class="heading">Training frameworks</text>
+    <text x="521" y="182" class="body">LlamaFactory</text>
+    <path d="M664 164V186" class="inline-separator"/>
+    <text x="686" y="182" class="body">ms-swift</text>
+  </g>
+
+  <path d="M640 206V242" class="connector"/>
+
+  <g id="adapters">
+    <rect x="48" y="242" width="1184" height="90" rx="16" fill="#f3f7fc" stroke="#d8e3f0" stroke-width="1.5"/>
+    <text x="76" y="280" class="heading">Adapter</text>
+    <rect x="198.15" y="256.5" width="132" height="28" rx="6" class="design-badge"/>
+    <text x="208.15" y="276.5" class="design-label">Non-invasive</text>
+    <text x="76" y="311" class="body">Framework integration</text>
+    <text x="521" y="280" class="body">llamafactory_v0</text>
+    <text x="686" y="280" class="body">msswift</text>
+    <text x="640" y="311" text-anchor="middle" class="body">Model loading, training and saving without framework source changes</text>
+    <text x="1204" y="280" text-anchor="end" class="note">register_adapter()</text>
+  </g>
+
+  <path d="M640 332V394" class="connector"/>
+  <text x="658" y="369" class="note">calls</text>
+
+  <g id="model">
+    <rect x="48" y="394" width="330" height="226" rx="18" fill="#f7f5fc" stroke="#e0d9f0" stroke-width="1.5"/>
+    <text x="76" y="437" class="heading">Model</text>
+    <rect x="172.89" y="413.5" width="132" height="28" rx="6" class="design-badge"/>
+    <text x="182.89" y="433.5" class="design-label">Non-invasive</text>
+    <text x="76" y="470" class="body subtitle">Hugging Face Transformers</text>
+    <path d="M76 491H350" stroke="#e0d9f0"/>
+    <text x="76" y="523" class="body">TurboModel / TurboVLMModel</text>
+    <text x="76" y="558" class="body">Wraps original model code</text>
+    <text x="76" y="592" class="body">LLMs / VLMs / MoE</text>
+  </g>
+
+  <path d="M378 507H438" class="connector"/>
+  <path d="M902 507H842" class="connector"/>
+
+  <g id="engine">
+    <rect x="438" y="394" width="404" height="226" rx="18" fill="#edf5ff" stroke="#a9ccf9" stroke-width="1.5"/>
+    <text x="466" y="437" class="heading">Engine</text>
+    <rect x="575.34" y="413.5" width="185" height="28" rx="6" class="design-badge"/>
+    <text x="585.34" y="433.5" class="design-label">Algorithm-agnostic</text>
+    <text x="466" y="470" class="body">TorchTurboEngine</text>
+    <path d="M466 491H814" stroke="#cbdff8"/>
+    <text x="466" y="523" class="body">prepare_model()</text>
+    <text x="466" y="558" class="body">prepare_optimizer()</text>
+    <text x="466" y="592" class="body">Training &amp; checkpoint I/O</text>
+  </g>
+
+  <g id="parallel-plan">
+    <rect x="902" y="394" width="330" height="226" rx="18" fill="#fcf8f1" stroke="#eadfcb" stroke-width="1.5"/>
+    <text x="930" y="437" class="heading">ParallelPlan</text>
+    <text x="930" y="470" class="body subtitle">Model defaults + overrides</text>
+    <path d="M930 491H1204" stroke="#eadfcb"/>
+    <text x="930" y="523" class="body">Placement &amp; sharding</text>
+    <text x="930" y="558" class="body">Module replacement</text>
+    <text x="930" y="592" class="body">Activation checkpointing</text>
+  </g>
+
+  <path d="M640 620V682" class="connector"/>
+  <text x="658" y="657" class="note">executes via</text>
+
+  <g id="backend">
+    <rect x="48" y="682" width="1184" height="234" rx="18" fill="#f3f8f6" stroke="#d4e5df" stroke-width="1.5"/>
+    <text x="76" y="725" class="heading">Backend</text>
+    <text x="276" y="725" class="body">Execution layer</text>
+    <text x="1204" y="725" text-anchor="end" class="note">register_backend()</text>
+
+    <g id="fsdp2-backend">
+      <rect x="76" y="748" width="1128" height="146" rx="12" fill="#ffffff" stroke="#d8e7e1"/>
+      <text x="104" y="778" class="item implementation">FSDP2 / DTensor</text>
+      <text x="1176" y="778" text-anchor="end" class="note">Current implementation</text>
+      <path d="M104 791H1176" stroke="#deebe6"/>
+
+      <text x="104" y="820" class="item">FSDP</text>
+      <text x="104" y="846" class="body">Fully sharded data parallelism</text>
+      <path d="M452 806V853" stroke="#deebe6"/>
+      <text x="480" y="820" class="item">EP</text>
+      <text x="480" y="846" class="body">Expert parallelism</text>
+      <path d="M828 806V853" stroke="#deebe6"/>
+      <text x="856" y="820" class="item">Ulysses SP</text>
+      <text x="856" y="846" class="body">Sequence parallelism</text>
+
+      <text x="104" y="877" class="note">Checkpoint I/O / Mixed precision / MoE prefetch / CPU offload / Chunk loss / Optimizer swap (AdamW, Muon)</text>
+    </g>
+  </g>
+
+  <path d="M640 916V968" class="connector"/>
+  <text x="658" y="950" class="note">built on</text>
+
+  <g id="runtime">
+    <rect x="48" y="968" width="1184" height="72" rx="14" fill="#f6f8fb" stroke="#dfe5ed"/>
+    <text x="76" y="1012" class="heading">Runtime</text>
+    <text x="435" y="1012" class="body">PyTorch</text>
+    <path d="M529 994V1016" class="inline-separator"/>
+    <text x="551" y="1012" class="body">Device runtime + optimized ops</text>
+  </g>
+</svg>

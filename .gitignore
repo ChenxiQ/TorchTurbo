@@ -1,0 +1,53 @@
+__pycache__
+
+# Python egg metadata, regenerated from source files by setuptools
+*.egg-info/
+*.egg
+
+# Compiled Python files
+*.pyc
+*.pyo
+*.pyd
+
+# Build / distribution
+build/
+dist/
+*.whl
+!docker/npu/pkg/*.whl
+
+# pip temporary dirs
+pip-build-tracker-*/
+pip-ephem-wheel-cache-*/
+pip-install-*/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local agent/assistant settings
+.claude/
+.kiro
+
+# Logs & runtime artifacts
+*.log
+logs/
+
+# OS generated files
+**/.DS_Store
+Thumbs.db

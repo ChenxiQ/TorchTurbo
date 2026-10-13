@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools", "torch"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "torchturbo"
+version = "0.1.0"
+description = "A supernode-native post-training engine for large language and vision models"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.11.0"
+dependencies = [
+    "torch>=2.10.0",
+    "omegaconf>=2.3.0",
+    "PyYAML>=6.0",
+    "safetensors>=0.4.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/torchturbo"]

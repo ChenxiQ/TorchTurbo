@@ -1,0 +1,86 @@
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Any
+
+import torch
+import torch.nn.functional as F
+
+from torchturbo.runtime import TurboDevice
+
+from ...base import OpImpl, OpImplKind
+from ...registry import register_op
+
+
+_SUPPORTED_ACTIVATIONS = (F.silu, F.gelu)
+
+
+def _torch_gated_activation(
+    x: torch.Tensor,
+    *,
+    activation_func: Callable[[torch.Tensor], torch.Tensor],
+    limit: float = 0.0,
+    clamp_gate_after_activation: bool = False,
+) -> torch.Tensor:
+    """Apply ``act(gate) * up`` to ``x = [gate, up]``.
+
+    A positive ``limit`` clamps ``up`` to ``[-limit, limit]`` and caps the
+    gate either before the activation (``act(min(gate, limit))``) or, with
+    ``clamp_gate_after_activation``, after it (``min(act(gate), limit)``).
+    """
+    if activation_func not in _SUPPORTED_ACTIVATIONS:
+        raise ValueError("gated_activation only supports F.silu and F.gelu.")
+
+    limit = float(limit)
+    if limit < 0:
+        raise ValueError("limit must be non-negative.")
+
+    gate, up = torch.chunk(x, 2, dim=-1)
+    if limit == 0:
+        return (activation_func(gate) * up).to(x.dtype)
+
+    up = torch.clamp(up.float(), min=-limit, max=limit)
+    if clamp_gate_after_activation:
+        activated_gate = torch.clamp(activation_func(gate.float()), max=limit)
+    else:
+        activated_gate = activation_func(torch.clamp(gate.float(), max=limit))
+    return (activated_gate * up).to(x.dtype)
+
+
+@register_op(
+    op_name="gated_activation",
+    impl_name="torch_compile_gated_activation",
+    kind=OpImplKind.CUSTOM,
+    priority=50,
+    devices=(TurboDevice.CUDA,),
+)
+class TorchCompileGatedActivation(OpImpl):
+    def __init__(self) -> None:
+        self._compiled: dict[tuple[Callable, float, bool], Any] = {}
+
+    def available(self) -> bool:
+        return hasattr(torch, "compile")
+
+    def __call__(
+        self,
+        x: torch.Tensor,
+        *,
+        activation_func: Callable[[torch.Tensor], torch.Tensor],
+        limit: float = 0.0,
+        clamp_gate_after_activation: bool = False,
+    ) -> torch.Tensor:
+        key = (activation_func, float(limit), clamp_gate_after_activation)
+        compiled = self._compiled.get(key)
+        if compiled is None:
+
+            def gated_activation_impl(tensor: torch.Tensor) -> torch.Tensor:
+                return _torch_gated_activation(
+                    tensor,
+                    activation_func=activation_func,
+                    limit=limit,
+                    clamp_gate_after_activation=clamp_gate_after_activation,
+                )
+
+            compiled = torch.compile(gated_activation_impl)
+            self._compiled[key] = compiled
+        return compiled(x)

@@ -1,0 +1,15 @@
+engine_config:
+  parallel_plan:
+    sp_size: 2
+    ep_size: 8
+  moe:
+    z_loss_coeff: 0.0000029
+  activation_checkpointing:
+    use_reentrant: true
+  loss_chunk:
+    enabled: true
+  mfu:
+    enabled: true
+  mtp:
+    enabled: true
+    loss_scaling_factor: 0.1

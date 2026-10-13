@@ -1,0 +1,22 @@
+engine_config:
+  parallel_plan:
+    sp_size: 4
+    ep_size: 16
+
+  freeze_policy:
+    vision_tower: true
+    multi_modal_projector: true
+
+  activation_checkpointing:
+    enabled: true
+    use_reentrant: true
+
+  backend_config:
+    cpu_offload:
+      enabled: true
+
+  moe:
+    aux_loss_coeff: 1e-6
+
+  mfu:
+    enabled: true

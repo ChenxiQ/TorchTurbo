@@ -1,0 +1,140 @@
+# 使用方式
+#
+# LLaMA-Factory：
+#
+# torchrun --nproc_per_node=8 scripts/runs/run_lf.py \
+#     --tt_config scripts/runs/config_example.yaml \
+#     <LLaMA-Factory arguments>
+#
+# ms-swift：
+#
+# torchrun --nproc_per_node=8 scripts/runs/run_swift.py \
+#     --tt_config scripts/runs/config_example.yaml \
+#     <ms-swift arguments>
+#
+# Complete example of the EngineConfig fields consumed by --tt_config.
+engine_config:
+  backend: fsdp2
+
+  parallel_plan:
+    sp_size: 1
+    ep_size: 1
+    # Example FQN patches. Adjust these patterns to match the target model.
+    plan:
+      "model.language_model.layers.*":
+        activation_checkpoint: true
+      "model.visual.blocks.*":
+        activation_checkpoint: true
+      "model.visual":
+        standalone_world_shard: true
+      "model.language_model.embed_tokens":
+        standalone_world_shard: true
+      "lm_head":
+        standalone_world_shard: true
+      "mtp.layers.*":
+        activation_checkpoint: true
+      "**.expert":
+        no_shard: true
+
+  mixed_precision: bf16
+  use_deterministic_algorithms: false
+
+  ops:
+    policy: auto
+    overrides:
+      rms_norm: torch_rms_norm
+
+  backend_config:
+    reshard_after_forward: true
+    prefetch_strategy: auto
+    prefetch_direction: forward_backward
+    forward_prefetch_depth: 1
+    backward_prefetch_depth: 1
+    # CPU offload config
+    cpu_offload:
+      # if "enabled" is "false", CPU offload is disabled
+      enabled: false
+      # "optimizer" keeps parameters on device; "full" also offloads FSDP parameters
+      mode: optimizer
+      # Fraction of free device memory for AdamWSwap/Muon workspaces
+      # Zero selects CPU updates, including CPU Newton-Schulz and exchange for Muon
+      optimizer_memory_fraction: 0.8
+
+  checkpoint:
+    # Training checkpoints always store exact model state. FSDP2 stores it as
+    # native DCP. hf_export controls
+    # HF safetensors exports: "every" (default) exports with every checkpoint,
+    # while "final" exports only with the final save.
+    hf_export: every
+
+  activation_checkpointing:
+    enabled: true
+    use_reentrant: false
+
+  # Engine-managed optimizer configuration.
+  optimizer:
+    # Optimizer selected by the engine. Currently only "muon" is supported.
+    name: muon
+    # Runtime policy for distributed Muon and its fallback AdamW optimizer.
+    muon:
+      # Base learning rate shared by Muon and fallback AdamW parameter groups.
+      lr: 0.02
+      # Decoupled weight decay shared by Muon and AdamW decay parameter groups.
+      weight_decay: 0.01
+      # Momentum coefficient used by Muon.
+      momentum: 0.95
+      # Apply Nesterov momentum when preparing Muon updates.
+      nesterov: true
+      # Newton-Schulz iteration coefficients.
+      ns_coefficients: [3.4445, -4.7750, 2.0315]
+      # Minimum norm used when normalizing Newton-Schulz inputs.
+      eps: 1.0e-7
+      # Number of Newton-Schulz iterations per Muon update.
+      ns_steps: 5
+      # Matrix-shape LR adjustment: original, match_rms_adamw,
+      # spectral_unclamped, or null.
+      adjust_lr_fn: match_rms_adamw
+      # Overlap owned-parameter communication with Muon computation when
+      # supported.
+      overlap_comm_compute: true
+      # Beta coefficients used by the fallback AdamW optimizer.
+      adamw_betas: [0.9, 0.999]
+      # Numerical stability epsilon used by the fallback AdamW optimizer.
+      adamw_eps: 1.0e-8
+      # Enable fused fallback AdamW; null lets PyTorch choose its default.
+      adamw_fused: null
+      # Optional MLA QK clipping, declared by the model's Muon recipe.
+      # Set to {threshold: 100.0, alpha: 0.5} to enable it.
+      qk_clip: null
+      # Policy for combining Muon parameters into communication buckets.
+      bucket:
+        # Bucket strategy: parameter, size, or single.
+        strategy: parameter
+        # Size limit in MiB. Required for size and unused by other strategies.
+        bucket_cap_mb: null
+
+  mtp:
+    enabled: false
+    loss_scaling_factor: 0.1
+
+  # DeepSeek-V4 DSpark draft training. Applies only when MTP is enabled and the
+  # model config sets dspark_block_size > 0.
+  dspark:
+    enabled: true
+    loss_scaling_factor: 0.1
+    num_anchors: 512
+    loss_decay_gamma: 4.0
+    ce_loss_alpha: 0.1
+    l1_loss_alpha: 0.9
+    confidence_loss_alpha: 1.0
+
+  freeze_policy:
+    vision_tower: false
+    multi_modal_projector: false
+    language_model: false
+
+  diffusion:
+    cap_lambda: 0.0
+    bd_mask_low: 0.3
+    bd_mask_high: 0.8
+    bd_block_size: 32

@@ -1,0 +1,57 @@
+{
+  "science": {
+    "hf_hub_url": "a-m-team/AM-Thinking-v1-Distilled",
+    "data_files": "science.jsonl",
+    "formatting": "sharegpt",
+    "columns": {
+      "messages": "conversations",
+      "system": "system"
+    },
+    "tags": {
+      "role_tag": "from",
+      "content_tag": "value",
+      "user_tag": "human",
+      "assistant_tag": "assistant"
+    }
+  },
+  "llava_1k_zh": {
+    "hf_hub_url": "BUAADreamer/llava-en-zh-2k",
+    "subset": "zh",
+    "formatting": "sharegpt",
+    "columns": {
+      "messages": "messages",
+      "images": "images"
+    },
+    "tags": {
+      "role_tag": "role",
+      "content_tag": "content",
+      "user_tag": "user",
+      "assistant_tag": "assistant"
+    }
+  },
+  "wikipedia_en": {
+    "hf_hub_url": "olm/olm-wikipedia-20221220",
+    "ms_hub_url": "AI-ModelScope/olm-wikipedia-20221220",
+    "columns": {
+      "prompt": "text"
+    }
+  },
+  "orca_rlhf": {
+    "hf_hub_url": "Intel/orca_dpo_pairs",
+    "ranking": true,
+    "columns": {
+      "prompt": "question",
+      "system": "system",
+      "chosen": "chosen",
+      "rejected": "rejected"
+    }
+  },
+  "gsm8k": {
+    "hf_hub_url": "openai/gsm8k",
+    "subset": "main",
+    "columns": {
+      "prompt": "question",
+      "response": "answer"
+    }
+  }
+}
