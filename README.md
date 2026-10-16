@@ -382,7 +382,7 @@ If you find this project useful, please consider citing it as follows:
 ```bibtex
 @misc{torchturbo2026,
   title        = {TorchTurbo: A supernode-native post-training engine for rapidly adapting and training large language and vision models.},
-  author       = {Tai An and Haishan Feng and Xuejin He and Chen Long and Yicheng Shan and Wei Tang and Chao Wang and Yifei Yang and Liangji Zhuang},
+  author       = {Tai An and Haishan Feng and Xuejin He and Chen Long and Yicheng Shan and Wei Tang and Chao Wang and Xiong Xu and Yifei Yang and Liangji Zhuang},
   year         = {2026},
   url          = {},
   license      = {Apache-2.0}
