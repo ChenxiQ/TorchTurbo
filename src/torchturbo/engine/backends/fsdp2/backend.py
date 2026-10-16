@@ -26,6 +26,7 @@ from torchturbo.models.modules.attention.ulysses import (
 )
 from torchturbo.models.modules.comm import all_gather_tensor
 from torchturbo.models.modules.loss import chunk_loss, logits_loss
+from torchturbo.models.modules.vision import register_vision_balance
 from torchturbo.parallel import (
     FSDPPlanSpec,
     FSDPParallelPlan,
@@ -359,6 +360,24 @@ class FSDP2Backend(BaseBackend):
         model_fqn_map: ModelFQNMap,
     ) -> _ResolvedFSDPPlan:
         """Resolve model-authored patterns to exact prepared-tree FQNs."""
+        for pattern, spec in plan.plan.items():
+            vision_spec = spec.vision_balance
+            if vision_spec is None or vision_spec.mode is None:
+                continue
+            matches_module = any(
+                match_fqn(pattern, fqn) and plan.match(fqn) is spec
+                for fqn in model_fqn_map.modules
+            )
+            if not matches_module:
+                raise ValueError(
+                    f"Vision balance pattern {pattern!r} does not resolve "
+                    "to a module in the active parallel plan."
+                )
+            if vision_spec.io is None:
+                raise ValueError(
+                    f"Vision balance pattern {pattern!r} requires a model-provided "
+                    "input/output adapter."
+                )
         model_fqns = tuple(model_fqn_map.modules) + tuple(model_fqn_map.parameters)
         unmatched_patterns = [
             pattern
@@ -470,6 +489,24 @@ class FSDP2Backend(BaseBackend):
         # Phase 4: FSDP2 sharding.
         model = self._shard_model(model, self._resolved_parallel_plan)
         self.prefetch_manager.setup(model)
+
+        # Append after FSDP hooks so unsharding and mixed-precision casting run
+        # before redistribution, and the fan-out runs after FSDP post-forward.
+        for fqn, spec in self._resolved_parallel_plan.modules.items():
+            vision_spec = spec.vision_balance
+            if vision_spec is None or vision_spec.mode is None:
+                continue
+            register_vision_balance(
+                model.get_submodule(fqn),
+                spec=vision_spec,
+                sp_size=sp_info["sp_size"],
+                sp_rank=sp_info["sp_rank"],
+            )
+            logger.info_rank0(
+                "Vision balance registered on %s (mode=%s)",
+                fqn,
+                vision_spec.mode.value,
+            )
 
         ep_size = self.get_ep_info()["ep_size"]
         if ep_size > 1:

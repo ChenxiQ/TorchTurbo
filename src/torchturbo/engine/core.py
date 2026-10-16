@@ -718,6 +718,7 @@ class TorchTurboEngine:
     def _resolve_parallel_plan(self, model: nn.Module):
         """Resolve the parallel plan for a model."""
         from ..models.base import TurboModel
+        from ..parallel import VisionBalanceSpec
 
         if not isinstance(model, TurboModel):
             raise TypeError(
@@ -745,6 +746,23 @@ class TorchTurboEngine:
                         for f in dataclasses.fields(engine_spec):
                             value = getattr(engine_spec, f.name)
                             if value is not None:
+                                if (
+                                    isinstance(value, VisionBalanceSpec)
+                                    and base.vision_balance is not None
+                                ):
+                                    base_vision = base.vision_balance
+                                    value = VisionBalanceSpec(
+                                        mode=(
+                                            value.mode
+                                            if value.mode is not None
+                                            else base_vision.mode
+                                        ),
+                                        io=(
+                                            value.io
+                                            if value.io is not None
+                                            else base_vision.io
+                                        ),
+                                    )
                                 overrides[f.name] = value
                         plan.plan[fqn] = dataclasses.replace(base, **overrides)
                     else:

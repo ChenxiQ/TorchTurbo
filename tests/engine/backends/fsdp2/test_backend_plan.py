@@ -19,7 +19,13 @@ import torch.nn as nn
 from torchturbo.engine.backends.fsdp2.backend import FSDP2Backend
 from torchturbo.engine.backends.fsdp2.config import CPUOffloadMode
 from torchturbo.engine.model_fqn import build_model_fqn_map
-from torchturbo.parallel import FSDPParallelPlan, FSDPPlanSpec
+from torchturbo.models.bailing_moe_v3_vl.vision_balance import BailingVisionBalanceIO
+from torchturbo.parallel import (
+    FSDPParallelPlan,
+    FSDPPlanSpec,
+    VisionBalanceMode,
+    VisionBalanceSpec,
+)
 
 
 class TaggedModule(nn.Module):
@@ -56,6 +62,22 @@ def make_backend(*, mtp_enabled=False):
         mtp=types.SimpleNamespace(enabled=mtp_enabled),
         loss_chunk=types.SimpleNamespace(enabled=False),
     )
+    return backend
+
+
+def make_preparing_backend(order, sp_info):
+    backend = make_backend()
+    backend.prefetch_manager = types.SimpleNamespace(
+        setup=lambda model: order.append("prefetch")
+    )
+    backend.get_ep_info = lambda: {"ep_size": 1}
+    backend.get_sp_info = lambda: sp_info
+    backend._init_mesh = lambda plan: order.append("init_mesh")
+    backend._replace_modules = lambda model, plan: order.append("replace") or model
+    backend._apply_activation_checkpointing = (
+        lambda model, plan: order.append("activation_checkpointing") or model
+    )
+    backend._shard_model = lambda model, plan: order.append("shard") or model
     return backend
 
 
@@ -824,18 +846,7 @@ def test_prepare_model_applies_input_slicing_before_checkpointing_and_sharding(s
 
     model.get_sequence_parallel_input_slicing_spec = get_input_slicing_spec
 
-    backend = make_backend()
-    backend.prefetch_manager = types.SimpleNamespace(
-        setup=lambda model: order.append("prefetch")
-    )
-    backend.get_ep_info = lambda: {"ep_size": 1}
-    backend.get_sp_info = lambda: sp_info
-    backend._init_mesh = lambda plan: order.append("init_mesh")
-    backend._replace_modules = lambda model, plan: order.append("replace") or model
-    backend._apply_activation_checkpointing = (
-        lambda model, plan: order.append("activation_checkpointing") or model
-    )
-    backend._shard_model = lambda model, plan: order.append("shard") or model
+    backend = make_preparing_backend(order, sp_info)
 
     assert backend.prepare_model(model, FSDPParallelPlan()) is model
 
@@ -848,6 +859,148 @@ def test_prepare_model_applies_input_slicing_before_checkpointing_and_sharding(s
         "prefetch",
     ]
     assert dict(backend.get_model_fqn_map().modules) == {"": ""}
+
+
+@pytest.mark.parametrize(
+    "mode", [None, VisionBalanceMode.PATCH, VisionBalanceMode.PATCH_SQ]
+)
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_prepare_model_registers_vision_balance_on_prepared_boundary(
+    monkeypatch, mode, wrapped
+):
+    from torchturbo.engine.backends.fsdp2 import backend as backend_module
+    from torchturbo.models.modules.attention.ulysses import SequenceParallelInputSlicingSpec
+
+    order = []
+    model = TaggedModule("root")
+    model.encoder = nn.Linear(2, 2)
+    model.unused_visual = nn.Linear(2, 2)
+    model.vision_tower_module_names = ("unused_visual",)
+    model.get_sequence_parallel_input_slicing_spec = lambda: (
+        SequenceParallelInputSlicingSpec(model, TaggedModule.forward)
+    )
+    boundary = model.encoder
+    if wrapped:
+        other = pytest.importorskip("peft.utils.other")
+        model.encoder = other.ModulesToSaveWrapper(model.encoder, "default")
+        boundary = model.encoder.modules_to_save["default"]
+
+    sp_info = {"sp_size": 2, "sp_group": None, "sp_rank": 1}
+    backend = make_preparing_backend(order, sp_info)
+    registrations = []
+
+    def register(module, **kwargs):
+        order.append("vision_balance")
+        registrations.append((module, kwargs))
+
+    monkeypatch.setattr(backend_module, "register_vision_balance", register)
+    vision_spec = VisionBalanceSpec(mode=mode, io=BailingVisionBalanceIO())
+    plan = FSDPParallelPlan(
+        plan={"encoder": FSDPPlanSpec(vision_balance=vision_spec)}
+    )
+
+    assert backend.prepare_model(model, plan) is model
+
+    assert order == [
+        "init_mesh",
+        "replace",
+        "activation_checkpointing",
+        "shard",
+        "prefetch",
+        *(["vision_balance"] if mode is not None else []),
+    ]
+    if mode is None:
+        assert registrations == []
+    else:
+        assert registrations == [
+            (boundary, {"spec": vision_spec, "sp_size": 2, "sp_rank": 1})
+        ]
+        assert registrations[0][1]["spec"] is vision_spec
+
+
+def test_prepare_model_uses_per_boundary_vision_balance_modes(monkeypatch):
+    from torchturbo.engine.backends.fsdp2 import backend as backend_module
+
+    order = []
+    model = TaggedModule("root")
+    model.image_encoder = nn.Linear(2, 2)
+    model.video_encoder = nn.Linear(2, 2)
+    backend = make_preparing_backend(
+        order, {"sp_size": 1, "sp_group": None, "sp_rank": 0}
+    )
+    registrations = []
+    monkeypatch.setattr(
+        backend_module,
+        "register_vision_balance",
+        lambda module, **kwargs: registrations.append((module, kwargs["spec"].mode)),
+    )
+    plan = FSDPParallelPlan(
+        plan={
+            "image_encoder": FSDPPlanSpec(
+                vision_balance=VisionBalanceSpec(
+                    mode=VisionBalanceMode.PATCH, io=BailingVisionBalanceIO()
+                )
+            ),
+            "video_encoder": FSDPPlanSpec(
+                vision_balance=VisionBalanceSpec(
+                    mode=VisionBalanceMode.PATCH_SQ, io=BailingVisionBalanceIO()
+                )
+            ),
+        }
+    )
+
+    backend.prepare_model(model, plan)
+
+    assert registrations == [
+        (model.image_encoder, VisionBalanceMode.PATCH),
+        (model.video_encoder, VisionBalanceMode.PATCH_SQ),
+    ]
+
+
+@pytest.mark.parametrize(
+    "pattern, shadowed",
+    [("missing", False), ("visual.weight", False), ("visual", True)],
+)
+def test_prepare_model_rejects_vision_balance_without_active_module(pattern, shadowed):
+    order = []
+    model = TaggedModule("root")
+    model.visual = nn.Linear(2, 2)
+    model.vision_tower_module_names = ("visual",)
+    backend = make_preparing_backend(
+        order, {"sp_size": 1, "sp_group": None, "sp_rank": 0}
+    )
+    entries = {"*": FSDPPlanSpec()} if shadowed else {}
+    entries[pattern] = FSDPPlanSpec(
+        vision_balance=VisionBalanceSpec(
+            mode=VisionBalanceMode.PATCH, io=BailingVisionBalanceIO()
+        )
+    )
+
+    with pytest.raises(ValueError, match="does not resolve to a module"):
+        backend.prepare_model(model, FSDPParallelPlan(plan=entries))
+
+    assert order == ["init_mesh", "replace"]
+
+
+def test_prepare_model_rejects_vision_balance_without_io_before_sharding():
+    order = []
+    model = TaggedModule("root")
+    model.visual = nn.Linear(2, 2)
+    backend = make_preparing_backend(
+        order, {"sp_size": 1, "sp_group": None, "sp_rank": 0}
+    )
+    plan = FSDPParallelPlan(
+        plan={
+            "visual": FSDPPlanSpec(
+                vision_balance=VisionBalanceSpec(mode=VisionBalanceMode.PATCH)
+            )
+        }
+    )
+
+    with pytest.raises(ValueError, match="requires a model-provided input/output adapter"):
+        backend.prepare_model(model, plan)
+
+    assert order == ["init_mesh", "replace"]
 
 
 def test_activation_checkpointing_patches_plan_targets(monkeypatch):
