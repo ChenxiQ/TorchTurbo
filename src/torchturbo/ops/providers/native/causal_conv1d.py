@@ -38,9 +38,11 @@ class FlaCausalConv1d(OpImpl):
         output_final_state: bool = False,
         packed_params=None,
         head_num=None,
+        cp_context=None,
         **kwargs,
     ):
         # fla's causal_conv1d is an autograd function returning (y, final_state).
+        # With cp_context, FLA uses its Triton context-parallel implementation.
         from fla.modules.convolution import causal_conv1d
 
         # ``packed_params`` is the provider API. Keep accepting the legacy
@@ -59,6 +61,7 @@ class FlaCausalConv1d(OpImpl):
             initial_state=initial_state,
             output_final_state=output_final_state,
             cu_seqlens=cu_seqlens,
+            cp_context=cp_context,
         )
         if head_num is not None and y is not None:
             # Mirror the AscendC provider's head-first spelling so callers can
