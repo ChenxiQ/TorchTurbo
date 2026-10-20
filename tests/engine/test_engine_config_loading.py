@@ -72,6 +72,20 @@ def _build_from_argv(argv: list[str]) -> EngineConfig:
     return build_from_args(tt)
 
 
+def test_fla_kcp_config_reaches_model_plan(tmp_path, monkeypatch):
+    assert build_from_args(TorchTurboArgs()).parallel_plan.use_fla_kcp is False
+    monkeypatch.setenv("TORCH_TURBO_USE_FLA_KCP", "true")
+    assert _build_from_argv([]).parallel_plan.use_fla_kcp is True
+    path = _write(tmp_path, "kcp.yaml", _engine_config(
+        "parallel_plan:\n  sp_size: 2\n  use_fla_kcp: false\n"
+    ))
+    assert _build_from_argv(["--tt_config", path]).parallel_plan.use_fla_kcp is False
+    config = _build_from_argv(["--tt_config", path, "--tt_use_fla_kcp", "true"])
+    plan = _resolve_engine_plan(config)
+    assert plan.use_fla_kcp is True
+    assert plan.sp_size == 2
+
+
 class _FakeQwen35Moe(TurboModel):
     """Model whose default plan mirrors ``qwen3_5_moe.parallel_plan``."""
 

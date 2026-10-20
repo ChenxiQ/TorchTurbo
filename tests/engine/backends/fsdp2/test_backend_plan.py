@@ -890,6 +890,19 @@ def test_chunked_loss_keeps_output_embedding_separate_from_tail_norm(
 
 
 @pytest.mark.parametrize("sp_size", [1, 2])
+def test_sp_info_carries_fla_kcp_choice(monkeypatch, sp_size):
+    backend = FSDP2Backend.__new__(FSDP2Backend)
+    backend._sp_size = sp_size
+    backend._sp_rank = 0
+    backend._sp_group = object() if sp_size > 1 else None
+    backend._use_fla_kcp = True
+    monkeypatch.setattr(torch.distributed, "is_initialized", lambda: True)
+    info = backend.get_sp_info()
+    assert info["use_fla_kcp"] is (sp_size > 1)
+    assert info["sp_size"] == sp_size
+
+
+@pytest.mark.parametrize("sp_size", [1, 2])
 def test_prepare_model_applies_input_slicing_before_checkpointing_and_sharding(sp_size):
     from torchturbo.models.modules.attention.ulysses import SequenceParallelInputSlicingSpec
 

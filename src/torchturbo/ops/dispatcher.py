@@ -429,13 +429,21 @@ class OpDispatcher:
         disable_recompute: bool = False,
         head_major_qkv: bool = False,
         cu_seqlens: torch.Tensor | None = None,
+        cu_seqlens_cpu: torch.Tensor | None = None,
         packed_params: PackedParams | None = None,
+        cp_context: Any = None,
         impl: str | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         if cu_seqlens is not None:
             if packed_params is not None:
                 raise ValueError("pass either cu_seqlens or packed_params, not both")
-            packed_params = get_packed_params(cu_seqlens, q.size(1), device=q.device)
+            seq_dim = 2 if head_major_qkv else 1
+            packed_params = get_packed_params(cu_seqlens, q.size(seq_dim), device=q.device)
+        boundary_kwargs = {}
+        if cp_context is not None:
+            boundary_kwargs["cp_context"] = cp_context
+        if cu_seqlens_cpu is not None:
+            boundary_kwargs["cu_seqlens_cpu"] = cu_seqlens_cpu
         return self._dispatch(
             "kda",
             q,
@@ -456,6 +464,7 @@ class OpDispatcher:
             disable_recompute=disable_recompute,
             head_major_qkv=head_major_qkv,
             packed_params=packed_params,
+            **boundary_kwargs,
             impl=impl,
         )
 
@@ -471,8 +480,16 @@ class OpDispatcher:
         cu_seqlens: torch.Tensor | None = None,
         packed_params=None,
         head_num=None,
+        cp_context: Any = None,
         impl: str | None = None,
     ):
+        # The AscendC convolution does not exchange CP halos.
+        cp_kwargs = {}
+        if cp_context is not None:
+            if impl not in (None, "fla_causal_conv1d"):
+                raise ValueError("cp_context is only supported by fla_causal_conv1d.")
+            impl = "fla_causal_conv1d"
+            cp_kwargs["cp_context"] = cp_context
         if cu_seqlens is not None:
             if packed_params is not None:
                 raise ValueError("pass either cu_seqlens or packed_params, not both")
@@ -487,6 +504,7 @@ class OpDispatcher:
             output_final_state=output_final_state,
             packed_params=packed_params,
             head_num=head_num,
+            **cp_kwargs,
             impl=impl,
         )
 

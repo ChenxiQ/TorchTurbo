@@ -90,3 +90,25 @@ def test_kda_explicit_ascendc_impl_fails_on_cpu(fla_stub):
             g=torch.randn(1, 8, 2, 4), beta=torch.rand(1, 8, 2),
             impl="ascendc_kda",
         )
+
+
+def test_kda_facade_preserves_cp_and_head_major_metadata(monkeypatch):
+    ops = get_or_create_ops(device_runtime=CpuRuntime())
+    captured = {}
+
+    def dispatch(op, *args, **kwargs):
+        captured.update(kwargs)
+        return args[0], None
+
+    monkeypatch.setattr(ops, "_dispatch", dispatch)
+    # More heads than tokens exposes accidental padding against the head axis.
+    q = torch.zeros(1, 8, 2, 128)
+    cu = torch.tensor([0, 2])
+    context = object()
+    ops.kda(q, q, q, q.transpose(1, 2), torch.zeros(1, 2, 8),
+            head_major_qkv=True, cu_seqlens=cu, cu_seqlens_cpu=cu,
+            cp_context=context, impl="ascendc_kda")
+    assert captured["cp_context"] is context
+    assert captured["cu_seqlens_cpu"] is cu
+    assert captured["packed_params"].cu_seqlens_list == [0, 2]
+    assert captured["impl"] == "ascendc_kda"

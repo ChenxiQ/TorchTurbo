@@ -1,11 +1,52 @@
-# AscendC KDA AllGather CP
+# KDA CP backends: AscendC AllGather and FLA Triton
 
 This branch adds an opt-in KDA context-parallel path on top of
 `feat/ascendc-chunk-kda`, baseline
 `b773bf4fa9581782246a970db5d461d12deabe11`.
 The branch name is `feat/ascendc-chunk-kda-cp`.
 
-## Enable
+Customer commit `d154f184f98a4e9611ca28962e80e53baffe1b36` from
+`Cruise20/TorchTurbo` adds the FLA Triton KCP path. Its configuration and
+convolution CP support are integrated alongside the AscendC path.
+
+## Choose a backend
+
+| Mode | `parallel_plan.use_fla_kcp` | `TORCHTURBO_KDA_CP` |
+| --- | --- | --- |
+| Baseline Ulysses | `false` | unset or `none` |
+| FLA Triton KCP | `true` | unset or `none` |
+| AscendC AllGather CP | `false` | `allgather` |
+
+Both CP modes reuse the existing SP group and size. Enabling both switches
+raises before either communication path is installed. With `sp_size=1`, the
+FSDP backend disables KCP and preserves the normal single-rank dispatch.
+
+The customer option supports the same public inputs as the source commit:
+
+```yaml
+engine_config:
+  parallel_plan:
+    sp_size: 2
+    use_fla_kcp: true
+```
+
+Equivalent explicit CLI selection is `--tt_use_fla_kcp true`; the environment
+input is `TORCH_TURBO_USE_FLA_KCP=true`. Existing precedence is CLI > file >
+environment > argument defaults. Set the AscendC switch to `none` or unset
+it when selecting Triton.
+
+Triton KCP builds FLA's context from global packed offsets, runs local
+full-head convolution with CP halo exchange, and dispatches KDA explicitly
+to `fla_kda`. AscendC keeps the Ulysses convolution bridge and dispatches
+KDA explicitly to `ascendc_kda`. Neither mode silently falls back to the
+other. Both Bailing hybrid and Bailing V3 VL forward the choice.
+
+The Triton model path passes raw beta logits to the native provider, which
+applies sigmoid exactly once. Unlike the AscendC convolution bridge, FLA's
+KDA/conv path does not shard heads. Other model attention layers may still
+impose their own SP divisibility constraints.
+
+## Enable AscendC AllGather
 
 ```bash
 export TORCHTURBO_KDA_CP=allgather
@@ -30,8 +71,10 @@ snapshot `fa5493f10e0bebe7a96ebcc81a4acf81d79f1e12`.
 
 ## Scope and data flow
 
-Only four production files change: the shared attention hook, the KDA
-wrapper, its autograd function, and the new `cp.py` state-exchange helper.
+The AscendC integration uses the shared attention hook, KDA wrapper,
+autograd function, `cp.py` state-exchange helper, and dispatcher facade.
+The facade forwards `cp_context` and `cu_seqlens_cpu`, and uses Q's sequence
+axis (axis 2 for head-major inputs) when normalizing packed metadata.
 
 ```text
 local tokens, all heads
@@ -89,14 +132,14 @@ The dense first-shard output additionally has an exact-equality assertion
 to guard FwdH's FP32 initial-state contract.
 
 The layer fixture executes this branch's actual attention forward, Ulysses
-communication functions, NPU KDA provider method, and AscendC convolution/KDA.
-It substitutes the dispatcher selection and runtime plumbing for isolated
+communication functions, KDA/conv dispatcher facades, NPU KDA provider method,
+and AscendC convolution/KDA. It substitutes provider selection and runtime plumbing for isolated
 imports, plus a PyTorch RMSNorm gate for the optional FLA Triton norm.
 It compares output, input gradients and projection/convolution/gate parameter
 gradients against distributed Ulysses or a single-rank layer.
 Test-only parameter SUM reductions are not part of production code.
 
-Validated on 2026-10-29:
+The initial AscendC migration was validated on 2026-10-29:
 
 | Check | Result |
 | --- | --- |
@@ -115,6 +158,31 @@ its parameter-gradient accumulation order differs and is not bitwise equal.
 Operator checks reach a maximum relative L2 of 0.0060337. Tolerances have
 not been relaxed from the previous bridge. Python compilation, Ruff error
 checks and `git diff --check` also pass.
+
+During the Triton cherry-pick, real dispatcher tests exposed that the previous
+layer fixture bypassed the KDA facade: it lacked both CP keyword arguments.
+The facade is now fixed and covered by CPU tests and the updated NPU fixture.
+The head-major metadata test also covers more heads than tokens, which detects
+accidental padding against the head axis.
+
+The updated two-rank NPU fixture passes all 36 checks against Ulysses and
+all 36 against the single-rank layer, now including the actual facades.
+Output and `o_proj.weight` gradient remain exactly equal to Ulysses on both
+ranks. The CP-disabled control is also exactly equal (36 checks). The
+two-rank standalone operator regression passes all 64 checks.
+
+The combined CPU regression passes 268 tests, with 6 skips and 3 expected
+failures. It covers dispatcher/provider contracts, dense/packed/padded KCP
+metadata, single sigmoid, full-head local shapes, LoRA and non-LoRA gate
+projections, mutually exclusive backend switches, config precedence, and
+config propagation through the engine/backend/model plan. FLA kernels are
+stubbed in CPU contract tests; these are not Triton numerical validation.
+The CPU test environment uses Python 3.12, torch 2.10.0+cpu and transformers
+5.21.0 in an isolated local environment.
+
+The operator environment on the NPU server lacks FLA/Triton. Triton CP
+forward/backward numerical and performance validation remains outstanding;
+its results cannot be inferred from the AscendC regression.
 
 Hardware validation on `179.166.1.3` uses Ascend910B3. These tests do not
 certify full A3 model training, FSDP, activation checkpointing, the actual

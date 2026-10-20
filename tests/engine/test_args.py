@@ -14,6 +14,18 @@ def test_string_to_bool_matches_transformers_semantics():
     assert string_to_bool("f") is False
 
 
+def test_parse_fla_kcp_flag():
+    from torchturbo.engine.args import parse_torchturbo_args
+
+    default, _ = parse_torchturbo_args([])
+    assert default.use_fla_kcp is False
+    assert "tt_use_fla_kcp" not in default.config_overrides
+    enabled, remaining = parse_torchturbo_args(["--tt_use_fla_kcp", "true", "--model-flag"])
+    assert enabled.use_fla_kcp is True
+    assert enabled.config_overrides["tt_use_fla_kcp"] is True
+    assert remaining == ["--model-flag"]
+
+
 def test_parse_torchturbo_args_log_level():
     from torchturbo.engine.args import parse_torchturbo_args
     from torchturbo.logging import LogLevel

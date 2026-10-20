@@ -95,15 +95,32 @@ def install_test_imports(adapter):
                  str(provider_path), "exec"), provider_namespace)
     provider = provider_namespace["AscendCKDA"]()
 
-    def kda(**kwargs):
+    def dispatch(op_name, *args, **kwargs):
         impl = kwargs.pop("impl", None)
+        if op_name == "causal_conv1d":
+            assert impl is None
+            return causal_conv1d(x=args[0], weight=args[1], bias=args[2], **kwargs)
+        assert op_name == "kda"
         if kwargs.get("cp_context") is not None:
             assert impl == "ascendc_kda"
-        return provider(**kwargs)
+        return provider(*args, **kwargs)
 
-    sys.modules["torchturbo.ops"] = SimpleNamespace(
-        ops=SimpleNamespace(causal_conv1d=causal_conv1d, kda=kda),
-    )
+    # Keep the real facade signatures and metadata normalization in this test.
+    dispatcher_path = ROOT / "ops/dispatcher.py"
+    dispatcher_tree = ast.parse(dispatcher_path.read_text())
+    dispatcher_class = next(node for node in dispatcher_tree.body
+                            if isinstance(node, ast.ClassDef) and node.name == "OpDispatcher")
+    dispatcher_class.body = [node for node in dispatcher_class.body
+                             if isinstance(node, ast.FunctionDef)
+                             and node.name in ("kda", "causal_conv1d")]
+    dispatcher_namespace = dict(torch=torch, Any=Any, PackedParams=packed.PackedParams,
+                                get_packed_params=packed.get_packed_params)
+    exec(compile(ast.Module(body=[dispatcher_class], type_ignores=[]),
+                 str(dispatcher_path), "exec"), dispatcher_namespace)
+    dispatcher = dispatcher_namespace["OpDispatcher"]()
+    dispatcher._dispatch = dispatch
+
+    sys.modules["torchturbo.ops"] = SimpleNamespace(ops=dispatcher)
     sys.modules["torchturbo.ops.providers.npu._fla_npu_kda"] = adapter
     sys.modules["fla.modules.fused_norm_gate"] = SimpleNamespace(rms_norm_gated=norm_gate)
     return load_file("bridge_attention", "models/bailing_hybrid/attention.py"), packed
