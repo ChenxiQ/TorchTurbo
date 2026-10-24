@@ -20,6 +20,7 @@ from torchturbo.engine.backends.fsdp2.backend import FSDP2Backend
 from torchturbo.engine.backends.fsdp2.config import CPUOffloadMode
 from torchturbo.engine.model_fqn import build_model_fqn_map
 from torchturbo.models.bailing_moe_v3_vl.vision_balance import BailingVisionBalanceIO
+from torchturbo.models.modules.cpu_resident import NodeSharedCPUResidentParameter
 from torchturbo.parallel import (
     FSDPParallelPlan,
     FSDPPlanSpec,
@@ -154,6 +155,40 @@ def test_cpu_offload_grad_norm_counts_replicated_grad_once(monkeypatch):
     torch.testing.assert_close(total_norm, torch.sqrt(torch.tensor(52.0)))
 
 
+@pytest.mark.parametrize("norm_type", [2.0, float("inf")])
+@pytest.mark.parametrize("max_norm", [1.0, 1000.0])
+def test_cpu_offload_norm_scales_experts_before_clipping(monkeypatch, norm_type, max_norm):
+    backend = make_backend()
+    backend.gradient_scaling_factor = 0.125
+    backend._device_runtime = types.SimpleNamespace(
+        device=torch.device("cpu"), synchronize=lambda: None
+    )
+    expert_grad = torch.tensor([24.0, 32.0])
+    dense_grad = torch.tensor([12.0])
+    expert_alias = expert_grad.view_as(expert_grad)
+    expert = types.SimpleNamespace(grad=types.SimpleNamespace(_local_tensor=expert_grad))
+    empty = types.SimpleNamespace(grad=types.SimpleNamespace(_local_tensor=torch.empty(0)))
+    dense = types.SimpleNamespace(grad=types.SimpleNamespace(_local_tensor=dense_grad))
+    replicated = nn.Parameter(torch.zeros(1))
+    replicated.grad = torch.tensor([5.0])
+
+    def reduce_shards(tensor, op, group):
+        if op == torch.distributed.ReduceOp.SUM:
+            tensor.mul_(4)
+
+    monkeypatch.setattr(torch.distributed, "all_reduce", reduce_shards)
+    expected_norm = torch.tensor(12.0 if norm_type == float("inf") else (4 * 169 + 25) ** 0.5)
+    factor = min(1.0, max_norm / (expected_norm.item() + 1e-6))
+    norm = backend._clip_grad_norm_cpu_offload(
+        [expert, empty], [dense], [replicated], max_norm, norm_type
+    )
+
+    torch.testing.assert_close(norm, expected_norm)
+    torch.testing.assert_close(expert_alias, torch.tensor([3.0, 4.0]) * factor)
+    torch.testing.assert_close(dense_grad, torch.tensor([12.0]) * factor)
+    torch.testing.assert_close(replicated.grad, torch.tensor([5.0]) * factor)
+
+
 @pytest.mark.parametrize("full_offload", [False, True])
 @pytest.mark.parametrize("norm_type", [2.0, float("inf")])
 @pytest.mark.parametrize("max_norm", [1.0, float("inf")])
@@ -223,6 +258,28 @@ def test_standalone_world_shard_skips_default_descendant_wrapping(monkeypatch):
         ("language_model", "world"),
         ("root", "world"),
     ]
+
+
+@pytest.mark.parametrize("device", ["meta", "cpu"])
+@pytest.mark.parametrize("requires_grad", [False, True])
+def test_cpu_resident_parameters_must_be_frozen(tmp_path, device, requires_grad):
+    backend = make_backend()
+    model = nn.Module()
+    model.table = NodeSharedCPUResidentParameter(
+        torch.ones(2, device=device), requires_grad=requires_grad, directory=tmp_path
+    )
+    model.weight = nn.Parameter(torch.ones(2, device=device))
+    plan = resolve_plan(
+        model, FSDPParallelPlan(plan={"weight": FSDPPlanSpec(no_shard=True)})
+    )
+
+    if requires_grad:
+        with pytest.raises(AssertionError, match="CPU resident.*frozen.*table"):
+            backend._collect_no_shard(model, plan)
+    else:
+        ignored, modules = backend._collect_no_shard(model, plan)
+        assert ignored == {model.table, model.weight}
+        assert modules == []
 
 
 def test_no_shard_matches_parameter_names(monkeypatch):
