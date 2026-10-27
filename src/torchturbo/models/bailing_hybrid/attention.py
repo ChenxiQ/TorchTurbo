@@ -154,7 +154,8 @@ def patch_kda_forward(
             g = self.f_proj(hidden_states)
         else:
             g = self.f_b_proj(self.f_a_proj(hidden_states))
-        beta = self.b_proj(hidden_states).float().sigmoid()
+        # KDA applies sigmoid internally and owns its backward derivative.
+        beta = self.b_proj(hidden_states).float()
 
         # q/k/v already come back head-first [B, H, T, D] from the fused
         # convolution, so only the gate needs its last-dim head split.
@@ -198,6 +199,7 @@ def patch_kda_forward(
             initial_state=None,
             output_final_state=True,
             use_qk_l2norm_in_kernel=True,
+            use_beta_sigmoid_in_kernel=True,
             use_gate_in_kernel=True,
             safe_gate=self.safe_gate,
             lower_bound=self.lower_bound,

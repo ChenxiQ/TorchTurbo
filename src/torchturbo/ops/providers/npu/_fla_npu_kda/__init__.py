@@ -2,11 +2,10 @@
 
 This package vendors the full-AscendC training adapter for the ``fla_npu``
 KDA operators (see ``ascendc_chunk_kda_function.py``): both the forward and
-the backward pass run the fused AscendC kernels.  L2 normalization of Q/K is
-NOT fused into the kernel -- the in-kernel variant needs the V2 three-stage
-forward, whose saved-value outlets are Ascend950-only -- so the adapter applies
-it with the fla-npu triton kernels (``fla_npu.ops.triton.l2norm_fwd/bwd``),
-which is the same split fla-org's triton path uses.
+the backward pass run the AscendC kernels. The updated A2/A3 interface supports
+fused Q/K L2 normalization and beta sigmoid in both passes. With sigmoid
+fusion enabled, callers pass raw beta logits; forward saves FP32 effective
+beta for backward.
 
 :func:`ascendc_chunk_kda` keeps fla-org's ``chunk_kda`` calling convention
 (``g``/``beta`` are ``[B, T, H, ...]``) and returns ``(o, final_state)``, with
@@ -16,8 +15,8 @@ time-first ``[B, T, H, D]`` or, with ``head_major_qkv=True``, the head-first
 keeps the whole Q/K/V path free of layout transposes.  Both packed varlen
 (``cu_seqlens`` given) and dense (``cu_seqlens=None``) inputs are supported.
 
-Unsupported configurations (beta-sigmoid-in-kernel, negative eigenvalues, CP
-context, inference intermediate states, V-first state layout, GVA,
+Unsupported configurations (CP context, inference intermediate states,
+V-first state layout, GVA,
 initial_state, chunk_size != 64, disable_recompute=False) are rejected before
 any AscendC kernel is launched.  The ops dispatcher selects an implementation
 once via ``available()`` and does NOT retry on exception, so such a raise
@@ -57,6 +56,8 @@ def ascendc_chunk_kda(
     A_log: torch.Tensor | None = None,
     dt_bias: torch.Tensor | None = None,
     head_major_qkv: bool = False,
+    use_beta_sigmoid_in_kernel: bool = False,
+    allow_neg_eigval: bool = False,
     **kwargs,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
     """Drop-in full-AscendC replacement for ``fla.ops.kda.chunk_kda``.
@@ -80,9 +81,9 @@ def ascendc_chunk_kda(
     ``output_final_state`` is honoured, but gradients w.r.t. final_state are
     NOT supported: the fused backward takes no dht.
     """
+    if allow_neg_eigval and not use_beta_sigmoid_in_kernel:
+        raise ValueError("allow_neg_eigval=True requires beta sigmoid fusion.")
     for unsupported in (
-        "use_beta_sigmoid_in_kernel",
-        "allow_neg_eigval",
         "cp_context",
         "return_intermediate_states",
     ):
@@ -175,8 +176,8 @@ def ascendc_chunk_kda(
         output_final_state,
         use_qk_l2norm_in_kernel,
         use_gate_in_kernel,
-        False,  # use_beta_sigmoid_in_kernel
-        False,  # allow_neg_eigval
+        bool(use_beta_sigmoid_in_kernel),
+        bool(allow_neg_eigval),
         state_v_first,
         cu_seqlens,
         cu_seqlens_cpu,

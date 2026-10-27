@@ -8,33 +8,30 @@ validated by MindSpeed-Bridge PR #8.  Layout handling:
   straight out of the fused short convolution, the forward runs with
   ``layout="NTD"`` (packed) / ``"BNSD"`` (dense), and the backward hands
   ``dq``/``dk``/``dv`` back head-first with no transpose.  Only ``g``/``beta``
-  (projection outputs, inherently sequence-major) and ``do``/``dg``/``db``
-  cross the layout boundary.
+  (projection outputs, inherently sequence-major) and ``do`` cross the
+  layout boundary. Finalize returns ``dg``/``db`` directly sequence-major.
 * ``head_major_qkv=False`` (fallback): fla-org's BSND calling convention is
   kept; the backward converts to head-major for the fused kernel and back.
 
-L2 normalization stays OUTSIDE the kernel and uses the fla-npu triton kernels
-(``fla_npu.ops.triton.l2norm_fwd/l2norm_bwd``), because the in-kernel variant
-needs the V2 three-stage forward, whose saved-value outlets are A5-only.  The
-triton kernels are rank-agnostic (``x.view(-1, D)``), so they work directly on
-head-major tensors without any layout conversion.
+Targets the updated A2/A3 KDA interface. L2 normalization runs in forward
+Prepare; saved normalized q/k and FP32 rstd feed fused backward Finalize.
+With use_beta_sigmoid_in_kernel=True, beta must contain raw logits. Forward
+exports FP32 effective beta; backward consumes it for the sigmoid derivative.
 
-Platform facts pinned by measurement on Ascend910_93 (A3), wheel a802b290:
-
-* ``NTD``/``BNSD`` produce bit-identical ``o``, intermediates and gradients
-  versus ``TND``/``BSND`` (bench/probe_kda_head_major_a3.py);
-* the fused backward only supports ``disable_recompute=True`` -- the recompute
-  variant routes to the A5-only optimized path (bench/probe_kda_recompute_a3.py);
-* ``q_rstd``/``k_rstd`` must NOT be passed: they select the Ascend950-only
-  optimized backward, which raises on A3 with no fallback.
+The public wrapper requires disable_recompute=True and forwards the fusion
+flags. The model passes raw beta when sigmoid fusion is enabled.
 """
 
 from __future__ import annotations
 
 import torch
 
-from fla_npu.ops.ascendc import npu_chunk_kda_bwd, npu_chunk_kda_fwd
-from fla_npu.ops.triton import l2norm_bwd, l2norm_fwd
+from fla_npu.ops.ascendc import (
+    npu_chunk_gated_delta_rule_bwd_dhu,
+    npu_chunk_kda_bwd_finalize,
+    npu_chunk_kda_bwd_prepare,
+    npu_chunk_kda_fwd,
+)
 
 import os
 
@@ -131,22 +128,10 @@ def _from_head_major(tensor, dtype):
     return tensor.to(dtype).unsqueeze(0).transpose(1, 2).contiguous()
 
 
-def _from_head_major_beta(tensor, dtype):
-    """[H, T] -> contiguous [1, T, H] in ``dtype``."""
-
-    return tensor.to(dtype).unsqueeze(0).transpose(1, 2).contiguous()
-
-
 def _from_bnsd(tensor, dtype):
     """[B, H, T, D] -> contiguous [B, T, H, D] in ``dtype`` (grad outputs)."""
 
     return tensor.to(dtype).permute(0, 2, 1, 3).contiguous()
-
-
-def _from_bnsd_beta(tensor, dtype):
-    """[B, H, T] -> contiguous [B, T, H] in ``dtype``."""
-
-    return tensor.to(dtype).transpose(1, 2).contiguous()
 
 
 def _normalise_intermediate(tensor, expected_rank):
@@ -203,10 +188,9 @@ class AscendCChunkKDAFunction(torch.autograd.Function):
         head_major_qkv: bool = False,
         export_intermediates: bool = True,
     ):
-        # use_beta_sigmoid_in_kernel / allow_neg_eigval / cp_context /
-        # return_intermediate_states / state_v_first=True are rejected by the
-        # public wrapper; they are kept in the signature so the backward
-        # return tuple mirrors fla-org's ChunkKDAFunction one-to-one.
+        # The sigmoid branch takes raw beta, not an externally applied sigmoid.
+        if allow_neg_eigval and not use_beta_sigmoid_in_kernel:
+            raise ValueError("allow_neg_eigval=True requires beta sigmoid fusion.")
         g_input = g
         cu_host = _host_cu_seqlens(cu_seqlens, cu_seqlens_cpu)
         is_varlen = cu_host is not None
@@ -227,13 +211,26 @@ class AscendCChunkKDAFunction(torch.autograd.Function):
             q_in, k_in, v_in = q, k, v
             g_in, beta_in = g_input, beta
 
-        # L2 normalization runs here on the fla-npu triton kernels, on whatever
-        # layout the kernel will consume -- both are row-major over the last
-        # (head) dim, so no conversion is needed in either mode.
-        q_rstd, k_rstd = None, None
+        # Saved-value outlets are head-major even when forward input is BSND.
+        q_hat, k_hat, q_rstd, k_rstd = None, None, None, None
         if use_qk_l2norm_in_kernel:
-            q_in, q_rstd = l2norm_fwd(q_in)
-            k_in, k_rstd = l2norm_fwd(k_in)
+            q_shape = q_in.shape if head_major_qkv else (
+                q_in.shape[0], q_in.shape[2], q_in.shape[1], q_in.shape[3]
+            )
+            k_shape = k_in.shape if head_major_qkv else (
+                k_in.shape[0], k_in.shape[2], k_in.shape[1], k_in.shape[3]
+            )
+            q_hat = torch.empty(q_shape, dtype=q.dtype, device=q.device)
+            k_hat = torch.empty(k_shape, dtype=k.dtype, device=k.device)
+            q_rstd = torch.empty(q_shape[:-1], dtype=torch.float32, device=q.device)
+            k_rstd = torch.empty(k_shape[:-1], dtype=torch.float32, device=k.device)
+
+        beta_eff = None
+        if use_beta_sigmoid_in_kernel:
+            beta_shape = beta_in.shape if head_major_qkv else (
+                beta_in.shape[0], beta_in.shape[2], beta_in.shape[1]
+            )
+            beta_eff = torch.empty(beta_shape, dtype=torch.float32, device=beta.device)
 
         outputs = list(
             npu_chunk_kda_fwd(
@@ -251,7 +248,14 @@ class AscendCChunkKDAFunction(torch.autograd.Function):
                 disable_recompute=export_intermediates,
                 return_intermediate_states=False,
                 state_v_first=False,
-                use_qk_l2norm_in_kernel=False,  # external l2norm (see above)
+                use_qk_l2norm_in_kernel=bool(use_qk_l2norm_in_kernel),
+                q_hat_out=q_hat,
+                k_hat_out=k_hat,
+                q_rstd_out=q_rstd,
+                k_rstd_out=k_rstd,
+                use_beta_sigmoid_in_kernel=bool(use_beta_sigmoid_in_kernel),
+                allow_neg_eigval=bool(allow_neg_eigval),
+                beta_eff_out=beta_eff,
                 use_exp2=True,
             )
         )
@@ -284,9 +288,17 @@ class AscendCChunkKDAFunction(torch.autograd.Function):
             v_new = _normalise_intermediate(v_new, token_rank)
             h = _normalise_intermediate(h, token_rank + 1)
 
-        # Saved in the kernel's spelling so the backward needs no conversion
-        # for q/k/v/g/beta.  q_in/k_in are the NORMALIZED tensors; q_rstd/
-        # k_rstd drive the external L2-norm backward.
+        if q_hat is not None:
+            token_rank = 3 if is_varlen else 4
+            q_in = _normalise_intermediate(q_hat, token_rank)
+            k_in = _normalise_intermediate(k_hat, token_rank)
+            q_rstd = _normalise_intermediate(q_rstd, token_rank - 1)
+            k_rstd = _normalise_intermediate(k_rstd, token_rank - 1)
+        if beta_eff is not None:
+            beta_in = _normalise_intermediate(beta_eff, 2 if is_varlen else 3)
+
+        # Fused normalized q/k and rstd are head-major; v/g keep input layout.
+        # Fused beta is saved head-major in FP32 to preserve its derivative.
         ctx.save_for_backward(
             q_in, q_rstd, k_in, k_rstd, v_in, g_in, beta_in, A_log, dt_bias,
             gk, Aqk, Akk, w, qg, kg, v_new, h,
@@ -295,6 +307,8 @@ class AscendCChunkKDAFunction(torch.autograd.Function):
         ctx.is_varlen = is_varlen
         ctx.head_major_qkv = bool(head_major_qkv)
         ctx.export_intermediates = export_intermediates
+        ctx.use_beta_sigmoid_in_kernel = bool(use_beta_sigmoid_in_kernel)
+        ctx.allow_neg_eigval = bool(allow_neg_eigval)
         # The rank the caller handed in: the head-major backward restores
         # dq/dk/dv to it and must not assume rank-4 (_drop_batch only
         # squeezes rank-4 inputs).
@@ -308,7 +322,6 @@ class AscendCChunkKDAFunction(torch.autograd.Function):
         ctx.safe_gate = safe_gate
         ctx.scale = scale
         ctx.lower_bound = lower_bound
-        ctx.use_qk_l2norm_in_kernel = use_qk_l2norm_in_kernel
         ctx.use_gate_in_kernel = use_gate_in_kernel
 
         return o.type_as(q_in), final_state
@@ -331,15 +344,17 @@ class AscendCChunkKDAFunction(torch.autograd.Function):
         is_varlen = ctx.is_varlen
         head_major_qkv = ctx.head_major_qkv
 
-        # q/k/v/g/beta were saved in the kernel's spelling.  Without
-        # head_major_qkv they are sequence-major and still need converting.
-        if head_major_qkv:
-            q_h, k_h, v_h, g_h, beta_h = q_hat, k_hat, v_in, g_in, beta_in
-        else:
+        # Fused q/k and rstd are already head-major, independent of input layout.
+        q_h, k_h = q_hat, k_hat
+        if not head_major_qkv and q_rstd is None:
             q_h = _seq_to_kernel(q_hat, is_varlen)
             k_h = _seq_to_kernel(k_hat, is_varlen)
+        v_h, g_h = v_in, g_in
+        if not head_major_qkv:
             v_h = _seq_to_kernel(v_in, is_varlen)
             g_h = _seq_to_kernel(g_in, is_varlen)
+        beta_h = beta_in
+        if not head_major_qkv and not ctx.use_beta_sigmoid_in_kernel:
             beta_h = _seq_to_kernel(beta_in, is_varlen, beta=True)
         # ``do`` follows ``o``, which the operator fixes to sequence-major.
         do_h = _seq_to_kernel(do, is_varlen)
@@ -351,53 +366,49 @@ class AscendCChunkKDAFunction(torch.autograd.Function):
             head_dim = q_h.shape[-1]
             dt_bias_h = dt_bias_h.view(heads, head_dim)
 
-        # q_rstd/k_rstd are deliberately NOT passed: they select the
-        # Ascend950-only optimized backward (which fuses the L2-norm backward
-        # into Finalize) and raise on A3 with no fallback.  The L2-norm
-        # backward is applied below on the fla-npu triton kernel instead.
-        dq_hat, dk_hat, dv, db, dg, dh0, dA, dbias = npu_chunk_kda_bwd(
-            q=q_h,
-            k=k_h,
-            v=v_h,
-            beta=beta_h,
-            gk=gk,
-            Aqk=Aqk,
-            Akk=Akk,
-            w=w,
-            qg=qg,
-            kg=kg,
-            v_new=v_new,
-            h=h,
-            d_o=do_h,
-            scale=ctx.scale,
-            raw_g=g_h,
-            A_log=_gate_parameter_for_ascendc(A_log),
-            dt_bias=dt_bias_h,
-            cu_seqlens=ctx.cu_host,
-            chunk_size=ctx.chunk_size,
-            safe_gate=ctx.safe_gate,
-            lower_bound=ctx.lower_bound,
-            use_gate_in_kernel=ctx.use_gate_in_kernel,
-            disable_recompute=ctx.export_intermediates,
-            use_exp2=True,
-        )
+        # Match the total backward's canonical metadata; empty sequences add no chunks.
+        cu_host, chunk_indices = ctx.cu_host, None
+        if is_varlen:
+            cu_host = [cu_host[0]] + [end for start, end in zip(cu_host, cu_host[1:])
+                                     if end > start]
+            chunk_indices = []
+            for seq, (start, end) in enumerate(zip(cu_host, cu_host[1:])):
+                for chunk in range((end - start + ctx.chunk_size - 1) // ctx.chunk_size):
+                    chunk_indices.extend((seq, chunk))
+        backward_layout = "NTD" if is_varlen else "BNSD"
 
-        # The fused backward returns gradients w.r.t. the NORMALIZED q/k in
-        # head-major layout; chain the L2-norm backward in the same layout.
-        if ctx.use_qk_l2norm_in_kernel:
-            if head_major_qkv:
-                q_norm, q_rstd_h = q_hat, q_rstd
-                k_norm, k_rstd_h = k_hat, k_rstd
-            else:
-                q_norm = _seq_to_kernel(q_hat, is_varlen)
-                k_norm = _seq_to_kernel(k_hat, is_varlen)
-                q_rstd_h = _seq_to_kernel(q_rstd, is_varlen, beta=True)
-                k_rstd_h = _seq_to_kernel(k_rstd, is_varlen, beta=True)
-            dq_raw = l2norm_bwd(q_norm, q_rstd_h, dq_hat)
-            dk_raw = l2norm_bwd(k_norm, k_rstd_h, dk_hat)
-        else:
-            dq_raw = dq_hat
-            dk_raw = dk_hat
+        # Same three kernels as the total backward; keep Finalize's token-major dG/dBeta.
+        d_aqk, dv_local, dq_raw = npu_chunk_kda_bwd_prepare(
+            Aqk, v_new, do_h, h, scale=ctx.scale, layout=backward_layout,
+            chunk_size=ctx.chunk_size, cu_seqlens=cu_host, chunk_indices=chunk_indices,
+        )
+        # Dhu takes rank-4 token tensors. Adding B=1 is a view, not a transpose.
+        scan_inputs = (qg, kg, w, do_h, dv_local, gk)
+        if is_varlen:
+            scan_inputs = tuple(t.unsqueeze(0) for t in scan_inputs)
+        qg_scan, kg_scan, w_scan, do_scan, dv_scan_in, gk_scan = scan_inputs
+        dh, dh0, dv_scan = npu_chunk_gated_delta_rule_bwd_dhu(
+            qg_scan, kg_scan, w_scan, do_scan, dv_scan_in, ctx.scale, ctx.chunk_size,
+            gK=gk_scan, cu_seqlens=cu_host, chunk_indices=chunk_indices, use_exp2=True,
+        )
+        if is_varlen:
+            dh, dv_scan = dh.squeeze(0), dv_scan.squeeze(0)
+        # The total backward also supplies zero bias when the optional input is absent.
+        if dt_bias_h is None:
+            dt_bias_h = torch.zeros((q_h.shape[-3], q_h.shape[-1]),
+                                   dtype=torch.float32, device=q_h.device)
+        dq_raw, dk_raw, dv, db, dg, dA, dbias = npu_chunk_kda_bwd_finalize(
+            q_h, k_h, v_h, gk, g_h.float(), beta_h.float(),
+            _gate_parameter_for_ascendc(A_log), dt_bias_h, Akk, v_new, h, dh,
+            dv_scan, d_aqk, dq_raw,
+            scale=ctx.scale, lower_bound=ctx.lower_bound, chunk_size=ctx.chunk_size,
+            safe_gate=ctx.safe_gate, use_gate_in_kernel=ctx.use_gate_in_kernel,
+            q_rstd=q_rstd, k_rstd=k_rstd,
+            cu_seqlens=cu_host, chunk_indices=chunk_indices,
+            output_layout=backward_layout,
+            use_beta_sigmoid_in_kernel=ctx.use_beta_sigmoid_in_kernel,
+            allow_neg_eigval=ctx.allow_neg_eigval, use_exp2=True,
+        )
 
         if head_major_qkv:
             # Q/K/V live head-first, so their gradients go back untouched apart
@@ -423,13 +434,10 @@ class AscendCChunkKDAFunction(torch.autograd.Function):
                 dk = _from_bnsd(dk_raw, ctx.k_dtype)
                 dv = _from_bnsd(dv, ctx.v_dtype)
 
-        # g/beta entered sequence-major, so their gradients leave that way.
+        # Finalize already writes dG/dBeta in the model's sequence-major layout.
         if is_varlen:
-            dg = _from_head_major(dg, ctx.g_dtype)
-            db = _from_head_major_beta(db, ctx.beta_dtype)
-        else:
-            dg = _from_bnsd(dg, ctx.g_dtype)
-            db = _from_bnsd_beta(db, ctx.beta_dtype)
+            dg, db = dg.unsqueeze(0), db.unsqueeze(0)
+        dg, db = dg.to(ctx.g_dtype), db.to(ctx.beta_dtype)
 
         dA = None if A_log is None else dA.to(A_log)
         if dbias is not None and dt_bias is not None:
@@ -437,6 +445,8 @@ class AscendCChunkKDAFunction(torch.autograd.Function):
                 # fused bwd returns [H, K]; fla-org's contract is [H*K]
                 dbias = dbias.reshape(-1)
             dbias = dbias.to(dt_bias)
+
+        dbias = None if dt_bias is None else dbias
 
         return (dq, dk, dv, dg, db, dA, dbias, None, dh0,
                 None, None, None, None, None, None, None, None, None, None,
