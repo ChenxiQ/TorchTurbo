@@ -30,10 +30,12 @@ RUN pip install triton==3.5.0
 RUN pip install triton-ascend==3.2.2 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
 COPY docker/npu/pkg/* /usr/local/package/
 RUN pip install /usr/local/package/torch_npu-2.10.0.post2-cp311-cp311-manylinux_2_28_aarch64.whl
-# Build fla-npu v26.9.1 for Ascend A3 at commit 36e67d2decea70745554f7aebf9a6a29e9168a91.
+# Build fla-npu from upstream main at commit fa5493f10e0bebe7a96ebcc81a4acf81d79f1e12
+# for Ascend A3 (ships the fused KDA kernels npu_chunk_kda_bwd_{prepare,dhu,finalize}
+# plus the in-kernel l2norm / beta-sigmoid fusion that the ascendc_kda provider needs).
 RUN bash -c "source /usr/local/Ascend/ascend-toolkit/set_env.sh \
     && git clone https://github.com/flashserve/flash-linear-attention-npu.git /tmp/flash-linear-attention-npu \
-    && git -C /tmp/flash-linear-attention-npu checkout 36e67d2decea70745554f7aebf9a6a29e9168a91 \
+    && git -C /tmp/flash-linear-attention-npu checkout fa5493f10e0bebe7a96ebcc81a4acf81d79f1e12 \
     && cd /tmp/flash-linear-attention-npu \
     && python -m pip install --no-cache-dir 'setuptools>=70.1' wheel -r requirements.txt \
     && FLA_NPU_SOC=ascend910_93 python scripts/build_wheel.py \
