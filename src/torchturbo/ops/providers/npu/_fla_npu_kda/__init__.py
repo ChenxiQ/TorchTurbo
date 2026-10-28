@@ -163,6 +163,10 @@ def ascendc_chunk_kda(
     # the export for genuinely grad-free callers (inference / eval).
     export_intermediates = torch.is_grad_enabled()
 
+    # Work around the slow BF16 gate path in AscendC Prepare.
+    # Keep the cast outside Function.apply so autograd restores the input dtype.
+    g = g.float()
+
     return AscendCChunkKDAFunction.apply(
         q,
         k,
