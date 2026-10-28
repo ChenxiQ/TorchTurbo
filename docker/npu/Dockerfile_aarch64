@@ -6,10 +6,13 @@ RUN dnf install -y \
         ca-certificates \
         cmake \
         curl \
+        gcc \
         gcc-c++ \
         git \
         make \
         nfs-utils \
+        numactl-devel \
+        openblas-devel \
         patch \
         tmux \
         unzip \
@@ -37,6 +40,21 @@ RUN bash -c "source /usr/local/Ascend/ascend-toolkit/set_env.sh \
     && python -m pip install --force-reinstall --no-cache-dir --no-deps dist/flash_linear_attention_npu_a3-*.whl \
     && rm -rf /tmp/flash-linear-attention-npu"
 RUN pip install /usr/local/package/flash_linear_attention-0.6.0-py3-none-any.whl
+# Disable mimalloc to avoid MADV_FREE reclaiming DMA-written pages.
+# Patch PyTorch's AArch64 default so USE_MIMALLOC=OFF takes effect.
+ARG MAX_JOBS=8
+RUN git clone --branch v2.10.0 --depth 1 --recurse-submodules --shallow-submodules \
+        https://github.com/pytorch/pytorch.git /tmp/pytorch \
+    && cd /tmp/pytorch \
+    && sed -i 's/if(WIN32 OR (CPU_AARCH64 AND NOT APPLE))/if(WIN32)/' CMakeLists.txt \
+    && pip install -r requirements-build.txt wheel \
+    && USE_CUDA=0 USE_ROCM=0 USE_MPS=0 USE_XPU=0 \
+        USE_MIMALLOC=OFF BUILD_TEST=0 BLAS=OpenBLAS \
+        PYTORCH_BUILD_VERSION=2.10.0+cpu.nomimalloc PYTORCH_BUILD_NUMBER=1 \
+        python setup.py bdist_wheel \
+    && pip install dist/torch-*.whl --force-reinstall --no-deps \
+    && cd / \
+    && rm -rf /tmp/pytorch
 # Install other packages
 RUN pip install py-spy==0.4.2
 
