@@ -124,6 +124,8 @@ class FSDPParallelPlan(ParallelPlan):
     use_fla_kcp:
         Whether to route KDA layers through FLA kernel context parallelism
         (KCP) instead of the default Ulysses sequence parallelism.
+    use_fla_kcp_ascend:
+        Whether to use AscendC AllGather KCP; mutually exclusive with use_fla_kcp.
     """
 
     plan: dict[str, FSDPPlacementSpec | FSDPPlanSpec | Any] = field(
@@ -133,9 +135,12 @@ class FSDPParallelPlan(ParallelPlan):
     ep_size: int = 1
     tp_size: int = 1
     use_fla_kcp: bool = False
+    use_fla_kcp_ascend: bool = False
 
     def __post_init__(self) -> None:
         """Normalize plan values to FSDPPlanSpec/FSDPPlacementSpec."""
+        if self.use_fla_kcp and self.use_fla_kcp_ascend:
+            raise ValueError("use_fla_kcp and use_fla_kcp_ascend: enable only one CP backend.")
         for k, v in list(self.plan.items()):
             if isinstance(v, tuple) and len(v) == 2:
                 self.plan[k] = FSDPPlanSpec(

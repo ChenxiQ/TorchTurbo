@@ -18,6 +18,7 @@ import torch
 import torchturbo.runtime.runtime as runtime_impl
 from torchturbo.ops import OpPolicy, get_or_create_ops
 from torchturbo.ops.providers import iter_provider_modules
+from torchturbo.ops.packed_params import get_packed_params
 from torchturbo.runtime import TurboDevice
 from torchturbo.runtime.cpu import CpuRuntime
 
@@ -89,3 +90,28 @@ def test_kda_explicit_ascendc_impl_fails_on_cpu(fla_stub):
             g=torch.randn(1, 8, 2, 4), beta=torch.rand(1, 8, 2),
             impl="ascendc_chunk_kda",
         )
+
+
+def test_chunk_kda_forwards_cp_metadata_without_evicting_global_cache(monkeypatch):
+    ops = get_or_create_ops(device_runtime=CpuRuntime())
+    captured = {}
+
+    def dispatch(name, *args, **kwargs):
+        assert name == "chunk_kda"
+        captured.update(kwargs)
+        return args[0], None
+
+    monkeypatch.setattr(ops, "_dispatch", dispatch)
+    global_cu = torch.tensor([0, 3, 4])
+    global_params = get_packed_params(global_cu, 4)
+    local_cu = torch.tensor([0, 2])
+    context = object()
+    q = torch.zeros(1, 8, 2, 128)
+    ops.chunk_kda(q, q, q, q.transpose(1, 2), torch.zeros(1, 2, 8),
+                  head_major_qkv=True, cp_context=context, cu_seqlens=local_cu,
+                  cu_seqlens_cpu=local_cu, impl="ascendc_chunk_kda")
+    assert captured["cp_context"] is context
+    assert captured["cu_seqlens"] is local_cu
+    assert captured["cu_seqlens_cpu"] is local_cu
+    assert captured["impl"] == "ascendc_chunk_kda"
+    assert get_packed_params(global_cu, 4) is global_params

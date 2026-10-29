@@ -1159,3 +1159,21 @@ def test_activation_checkpointing_disabled_warns_and_skips_plan_targets(monkeypa
     assert len(warnings) == 1
     assert "skipping activation checkpointing" in warnings[0][0]
     assert not hasattr(model.layers[0], "_tt_original_forward")
+
+
+@pytest.mark.parametrize("sp_size", [1, 2])
+def test_sp_info_carries_fla_kcp_choice(monkeypatch, sp_size):
+    backend = FSDP2Backend.__new__(FSDP2Backend)
+    backend._sp_size = sp_size
+    backend._sp_rank = 0
+    backend._sp_group = object() if sp_size > 1 else None
+    backend._use_fla_kcp = True
+    backend._use_fla_kcp_ascend = False
+    monkeypatch.setattr(torch.distributed, "is_initialized", lambda: True)
+    info = backend.get_sp_info()
+    assert info["use_fla_kcp"] is (sp_size > 1)
+    assert info["sp_size"] == sp_size
+    assert info["use_fla_kcp_ascend"] is False
+    backend._use_fla_kcp = False
+    backend._use_fla_kcp_ascend = True
+    assert backend.get_sp_info()["use_fla_kcp_ascend"] is (sp_size > 1)

@@ -1093,6 +1093,7 @@ def test_causal_conv1d_cp_context_forces_fla_triton(monkeypatch):
             output_final_state=False,
             packed_params=None,
             cp_context=None,
+            head_num=None,
         ):
             return ("fla", cp_context)
 
@@ -1108,6 +1109,7 @@ def test_causal_conv1d_cp_context_forces_fla_triton(monkeypatch):
             output_final_state=False,
             packed_params=None,
             cp_context=None,
+            head_num=None,
         ):
             return "ascendc"
 

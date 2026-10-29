@@ -423,11 +423,13 @@ class OpDispatcher:
         cp_context: Any = None,
         impl: str | None = None,
     ):
-        # AscendC has no KCP communication support; use FLA's Triton CP path.
+        # Only the FLA convolution implements CP halo exchange.
+        cp_kwargs = {}
         if cp_context is not None:
             if impl not in (None, "fla_causal_conv1d"):
                 raise ValueError("cp_context is only supported by fla_causal_conv1d.")
             impl = "fla_causal_conv1d"
+            cp_kwargs["cp_context"] = cp_context
         if cu_seqlens is not None:
             if packed_params is not None:
                 raise ValueError("pass either cu_seqlens or packed_params, not both")
@@ -442,7 +444,7 @@ class OpDispatcher:
             output_final_state=output_final_state,
             packed_params=packed_params,
             head_num=head_num,
-            cp_context=cp_context,
+            **cp_kwargs,
             impl=impl,
         )
 

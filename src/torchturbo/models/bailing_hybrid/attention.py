@@ -24,6 +24,7 @@ def patch_kda_forward(
     sp_size: int,
     sp_rank: int,
     use_fla_kcp: bool = False,
+    use_fla_kcp_ascend: bool = False,
 ) -> None:
     """Install packed KDA training with Ulysses or FLA context parallelism.
 
@@ -31,6 +32,8 @@ def patch_kda_forward(
     ``cu_seqlens`` keyword; convolutions and KDA share them while their
     parameters are sliced by head for Ulysses sequence parallelism.
     FLA context parallelism keeps all heads on each local sequence shard.
+    AscendC AllGather CP keeps the Ulysses convolution bridge, then restores
+    local tokens and all heads before the recurrent operator.
     """
     from fla.modules.fused_norm_gate import rms_norm_gated
 
@@ -40,6 +43,12 @@ def patch_kda_forward(
         gather_heads_scatter_seq,
         gather_seq_scatter_heads,
     )
+
+    if use_fla_kcp and use_fla_kcp_ascend:
+        raise ValueError("use_fla_kcp and use_fla_kcp_ascend: enable only one CP backend.")
+    use_ascendc_cp = use_fla_kcp_ascend and sp_size > 1
+    if use_ascendc_cp:
+        from torchturbo.ops.providers.npu._fla_npu_kda import KDAContextParallel
 
     def get_parameter_local_cp(weight: torch.Tensor, dim: int) -> torch.Tensor:
         if sp_size == 1:
@@ -90,6 +99,19 @@ def patch_kda_forward(
         packed_params = get_packed_params(cu_seqlens, q_len * sp_size)
         if packed_params is not None:
             cu_seqlens = packed_params.cu_seqlens
+        kda_kwargs = {}
+        if use_ascendc_cp:
+            if batch_size != 1:
+                raise ValueError("AscendC KCP requires batch_size=1.")
+            if self.num_heads % sp_size:
+                raise ValueError("KDA CP's convolution bridge requires heads divisible by SP size.")
+            offsets = (packed_params.cu_seqlens_list if packed_params is not None
+                       else [0, q_len * sp_size])
+            cp_context = KDAContextParallel.from_global_offsets(offsets, q_len, sp_group)
+            cu_seqlens = torch.tensor(cp_context.cu_seqlens, dtype=torch.int64)
+            kda_kwargs.update(
+                impl="ascendc_chunk_kda", cp_context=cp_context, cu_seqlens_cpu=cu_seqlens,
+            )
         q = self.q_proj(hidden_states)
         k = self.k_proj(hidden_states)
         v = self.v_proj(hidden_states)
@@ -151,6 +173,15 @@ def patch_kda_forward(
             head_num=v_heads,
         )
 
+        if use_ascendc_cp:
+            # Convolution resets at global boundaries; KDA owns local tokens.
+            q, k, v = (
+                gather_heads_scatter_seq(
+                    tensor, seq_dim=2, head_dim=1, sp_group=sp_group, sp_size=sp_size,
+                )
+                for tensor in (q, k, v)
+            )
+
         # Compute g, beta from padded hidden_states (always [B, T/sp, H] format)
         if self.no_kda_lora:
             g = self.f_proj(hidden_states)
@@ -163,7 +194,7 @@ def patch_kda_forward(
         # convolution, so only the gate needs its last-dim head split.
         g = g.unflatten(-1, (-1, self.head_dim))
 
-        if sp_size > 1:
+        if sp_size > 1 and not use_ascendc_cp:
             g = gather_seq_scatter_heads(
                 g, seq_dim=1, head_dim=2, sp_group=sp_group, sp_size=sp_size
             )
@@ -183,7 +214,7 @@ def patch_kda_forward(
 
         # ops dispatcher routes to the native fla triton chunk_kda by
         # default; the AscendC fused fwd+bwd provider is opt-in
-        # (TORCHTURBO_KDA_ASCENDC=1 or an explicit impl/override).
+        # (TORCHTURBO_KDA_ASCENDC=1, including explicit CP selection).
         #
         # ``head_major_qkv`` keeps Q/K/V head-first into the operator (the
         # native provider converts internally).  ``disable_recompute=True``
@@ -199,7 +230,7 @@ def patch_kda_forward(
             A_log=A_log_local,
             dt_bias=dt_bias_local,
             initial_state=None,
-            output_final_state=True,
+            output_final_state=not use_ascendc_cp,
             use_qk_l2norm_in_kernel=True,
             use_beta_sigmoid_in_kernel=True,
             use_gate_in_kernel=True,
@@ -208,9 +239,10 @@ def patch_kda_forward(
             cu_seqlens=cu_seqlens,
             disable_recompute=True,
             head_major_qkv=True,
+            **kda_kwargs,
         )
 
-        if sp_size > 1:
+        if sp_size > 1 and not use_ascendc_cp:
             # o: [B, T, H/sp, V] -> [B, T/sp, H, V]
             o = gather_heads_scatter_seq(
                 o, seq_dim=1, head_dim=2, sp_group=sp_group, sp_size=sp_size
@@ -310,7 +342,7 @@ def patch_kda_forward(
         g = g.unflatten(-1, (-1, self.head_dim))
 
         # Full A_log/dt_bias under KCP (no slicing).
-        o, _ = chunk_kda(
+        o, _ = ops.chunk_kda(
             q=q,
             k=k,
             v=v,
@@ -325,6 +357,7 @@ def patch_kda_forward(
             safe_gate=self.safe_gate,
             lower_bound=self.lower_bound,
             cp_context=cp_context,
+            impl="fla_chunk_kda",
         )
 
         # o_norm uses g recomputed from hidden_states.

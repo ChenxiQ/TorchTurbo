@@ -110,8 +110,8 @@ def test_mla_forward_pads_v_and_slices_output_under_fa_kernels(
         (torch.tensor([0, 3, 6], dtype=torch.int32), [0, 3, 6, 8]),
     ],
 )
-def test_kcp_builds_global_boundaries(monkeypatch, cu_seqlens, expected):
-    cp_module = pytest.importorskip("fla.ops.cp")
+def test_kcp_builds_global_boundaries(monkeypatch, fla_cp_stubs, cu_seqlens, expected):
+    cp_module = fla_cp_stubs
 
     from torchturbo.models.bailing_hybrid.modeling_bailing_moe_v3 import (
         BailingMoeV3KimiDeltaAttention,
@@ -154,8 +154,8 @@ def test_kcp_builds_global_boundaries(monkeypatch, cu_seqlens, expected):
 
 
 @pytest.mark.parametrize("sp_size", [1, 2])
-def test_kcp_rejects_multiple_samples_before_building_context(monkeypatch, sp_size):
-    cp_module = pytest.importorskip("fla.ops.cp")
+def test_kcp_rejects_multiple_samples_before_building_context(monkeypatch, fla_cp_stubs, sp_size):
+    cp_module = fla_cp_stubs
 
     from torchturbo.models.bailing_hybrid.modeling_bailing_moe_v3 import (
         BailingMoeV3KimiDeltaAttention,
@@ -188,11 +188,10 @@ def test_kcp_rejects_multiple_samples_before_building_context(monkeypatch, sp_si
         torch.ones(2, 4, dtype=torch.long),
     ],
 )
-def test_ulysses_ordinary_batches_use_fixed_length_convolution(monkeypatch, attention_mask):
+def test_ulysses_ordinary_batches_use_fixed_length_convolution(monkeypatch, fla_cp_stubs, attention_mask):
     from torchturbo.models.bailing_hybrid.modeling_bailing_moe_v3 import (
         BailingMoeV3KimiDeltaAttention,
     )
-    pytest.importorskip("fla.ops.kda")
     import torchturbo.ops as ops_module
 
     class ConvolutionCaptured(Exception):
@@ -215,6 +214,8 @@ def test_ulysses_ordinary_batches_use_fixed_length_convolution(monkeypatch, atte
 
     layer = SimpleNamespace(
         mode="chunk",
+        head_k_dim=2,
+        head_dim=2,
         q_proj=nn.Identity(),
         k_proj=nn.Identity(),
         v_proj=nn.Identity(),
@@ -229,3 +230,15 @@ def test_ulysses_ordinary_batches_use_fixed_length_convolution(monkeypatch, atte
 
     assert captured["shape"] == hidden_states.shape
     assert captured["packed_params"] is None
+
+
+@pytest.fixture
+def fla_cp_stubs(monkeypatch):
+    import sys
+
+    cp = SimpleNamespace(build_cp_context=lambda *args, **kwargs: None)
+    monkeypatch.setitem(sys.modules, "fla.ops.cp", cp)
+    monkeypatch.setitem(sys.modules, "fla.modules.fused_norm_gate", SimpleNamespace(
+        rms_norm_gated=lambda x, *args, **kwargs: x,
+    ))
+    return cp

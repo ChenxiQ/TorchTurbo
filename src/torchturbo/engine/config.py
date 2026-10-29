@@ -1148,6 +1148,7 @@ def _parse_parallel_plan(parallel_d: Mapping[str, Any]) -> FSDPParallelPlan:
         sp_size=parallel_d.get("sp_size", 1),
         ep_size=parallel_d.get("ep_size", 1),
         use_fla_kcp=parallel_d.get("use_fla_kcp", False),
+        use_fla_kcp_ascend=parallel_d.get("use_fla_kcp_ascend", False),
     )
 
 

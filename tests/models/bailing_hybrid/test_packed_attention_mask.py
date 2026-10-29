@@ -36,7 +36,9 @@ def test_model_preserves_packed_boundaries_for_kda(monkeypatch, cu_seq_lens, num
         captured.append(None if cu_seqlens is None else cu_seqlens.tolist())
         raise _CapturedKDA
 
-    monkeypatch.setattr(turbo_ops, "ops", SimpleNamespace(causal_conv1d=capture_conv))
+    monkeypatch.setattr(turbo_ops, "ops", SimpleNamespace(
+        causal_conv1d=capture_conv, chunk_kda=capture_kda,
+    ))
     monkeypatch.setitem(
         sys.modules, "fla.modules.fused_norm_gate", SimpleNamespace(rms_norm_gated=None)
     )

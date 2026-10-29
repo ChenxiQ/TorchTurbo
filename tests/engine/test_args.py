@@ -225,3 +225,27 @@ def test_parse_torchturbo_args_mtp_log_loss():
 
     assert args.mtp_log_loss is True
     assert remaining == ["--other"]
+
+
+def test_parse_fla_kcp_flag():
+    from torchturbo.engine.args import parse_torchturbo_args
+
+    default, _ = parse_torchturbo_args([])
+    assert default.use_fla_kcp is False
+    assert "tt_use_fla_kcp" not in default.config_overrides
+    enabled, remaining = parse_torchturbo_args(["--tt_use_fla_kcp", "true", "--model-flag"])
+    assert enabled.use_fla_kcp is True
+    assert enabled.config_overrides["tt_use_fla_kcp"] is True
+    assert remaining == ["--model-flag"]
+
+
+def test_parse_fla_kcp_flag_ascend():
+    from torchturbo.engine.args import parse_torchturbo_args
+
+    default, _ = parse_torchturbo_args([])
+    assert default.use_fla_kcp_ascend is False
+    assert "tt_use_fla_kcp_ascend" not in default.config_overrides
+    enabled, remaining = parse_torchturbo_args(["--tt_use_fla_kcp_ascend", "true", "--model-flag"])
+    assert enabled.use_fla_kcp_ascend is True
+    assert enabled.config_overrides["tt_use_fla_kcp_ascend"] is True
+    assert remaining == ["--model-flag"]

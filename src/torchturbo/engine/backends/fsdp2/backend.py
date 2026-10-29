@@ -156,6 +156,7 @@ class FSDP2Backend(BaseBackend):
         self._sp_group: dist.ProcessGroup = None
         self._sp_rank: int = 0
         self._use_fla_kcp: bool = False
+        self._use_fla_kcp_ascend: bool = False
 
         # Data parallel process group.
         # exposed through :`get_dp_info`.
@@ -448,6 +449,7 @@ class FSDP2Backend(BaseBackend):
 
         self.parallel_plan = plan
         self._use_fla_kcp = plan.use_fla_kcp
+        self._use_fla_kcp_ascend = plan.use_fla_kcp_ascend
 
         # Initialize DeviceMesh and SP groups
         self._init_mesh(plan)
@@ -1258,7 +1260,7 @@ class FSDP2Backend(BaseBackend):
         """Get sequence-parallel rank, size and group.
 
         Returns ``{"sp_size": ..., "sp_group": ..., "sp_rank": ...,
-        "use_fla_kcp": ...}``.
+        "use_fla_kcp": ..., "use_fla_kcp_ascend": ...}``.
         """
         if not dist.is_initialized():
             raise ValueError("Distributed not initialized")
@@ -1269,6 +1271,7 @@ class FSDP2Backend(BaseBackend):
                 "sp_group": self._sp_group,
                 "sp_rank": self._sp_rank,
                 "use_fla_kcp": self._use_fla_kcp,
+                "use_fla_kcp_ascend": self._use_fla_kcp_ascend,
             }
         else:
             return {
@@ -1276,6 +1279,7 @@ class FSDP2Backend(BaseBackend):
                 "sp_group": None,
                 "sp_rank": 0,
                 "use_fla_kcp": False,
+                "use_fla_kcp_ascend": False,
             }
 
     def get_ep_info(self) -> dict[str, Any]:

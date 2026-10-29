@@ -167,6 +167,7 @@ class TorchTurboArgs:
     sp_size: int | None = None
     ep_size: int | None = None
     use_fla_kcp: bool = False
+    use_fla_kcp_ascend: bool = False
     gbs: int | None = None
     gradient_checkpointing: bool = True
     ac_use_reentrant: bool = False
@@ -338,6 +339,18 @@ _TURBO_ARG_SPECS: tuple[TurboArgSpec, ...] = (
         help="Route KDA layers through FLA kernel context parallelism (KCP) "
         "instead of the default Ulysses sequence parallelism. "
         "Replaces TORCH_TURBO_USE_FLA_KCP.",
+    ),
+    TurboArgSpec(
+        name="use_fla_kcp_ascend",
+        args_name="use_fla_kcp_ascend",
+        cli_name="--tt_use_fla_kcp_ascend",
+        env_name="TORCH_TURBO_USE_FLA_KCP_ASCEND",
+        config_path="parallel_plan.use_fla_kcp_ascend",
+        type=string_to_bool,
+        metavar="BOOL",
+        help="Route KDA layers through AscendC AllGather context parallelism (KCP) "
+        "instead of the default Ulysses sequence parallelism. "
+        "Replaces TORCH_TURBO_USE_FLA_KCP_ASCEND.",
     ),
     TurboArgSpec(
         name="gbs",
@@ -829,6 +842,7 @@ def parse_torchturbo_args(argv: list[str]) -> tuple[TorchTurboArgs, list[str]]:
             args.sp_size,
             args.ep_size,
             args.use_fla_kcp,
+            args.use_fla_kcp_ascend,
             args.cpu_offload_enabled,
             args.enable_mtp,
             args.mtp_loss_scaling_factor,

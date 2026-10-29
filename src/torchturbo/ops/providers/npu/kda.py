@@ -1,15 +1,14 @@
 """NPU (AscendC) provider for the chunk_kda op.
 
-Full AscendC training mode: both the fused ``ChunkKdaFwd`` forward (with
-external L2 normalization via the fla-npu triton kernels) and the fused
-``ChunkKdaBwd`` backward from the ``fla_npu`` package (vendored in
-``ops/providers/npu/_fla_npu_kda``).
+Full AscendC training mode with fused L2 normalization, beta sigmoid and gate.
+Targets FLAN d77c37382aa8cf53e25005615c8c3f761fc137d2 (PR #998 merge).
+The vendored adapter uses the fused forward without CP, split forward stages
+with AllGather CP, and the shared Prepare/Dhu/Finalize backward.
 
 Opt-in by design: ``available()`` stays False even when fla_npu is
-importable, so the default `auto` selection on NPU keeps the battle-tested
-fla-org triton provider.  ``TORCHTURBO_KDA_ASCENDC=1`` opts in; an explicit
-``impl='ascendc_chunk_kda'`` or an ``ops.overrides`` entry selects it
-directly regardless of the env.
+importable, so the default `auto` selection on NPU keeps the fla-org triton
+provider. ``TORCHTURBO_KDA_ASCENDC=1`` opts in. Explicit selection and CP
+also require this existing switch, because dispatch checks availability.
 """
 
 from __future__ import annotations
