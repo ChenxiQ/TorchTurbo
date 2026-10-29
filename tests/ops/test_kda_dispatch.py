@@ -18,6 +18,7 @@ import torch
 import torchturbo.runtime.runtime as runtime_impl
 from torchturbo.ops import OpPolicy, get_or_create_ops
 from torchturbo.ops.providers import iter_provider_modules
+from torchturbo.ops.packed_params import get_packed_params
 from torchturbo.runtime import TurboDevice
 from torchturbo.runtime.cpu import CpuRuntime
 
@@ -92,7 +93,7 @@ def test_kda_explicit_ascendc_impl_fails_on_cpu(fla_stub):
         )
 
 
-def test_kda_facade_preserves_cp_and_head_major_metadata(monkeypatch):
+def test_kda_facade_preserves_cp_metadata_and_global_cache(monkeypatch):
     ops = get_or_create_ops(device_runtime=CpuRuntime())
     captured = {}
 
@@ -104,11 +105,33 @@ def test_kda_facade_preserves_cp_and_head_major_metadata(monkeypatch):
     # More heads than tokens exposes accidental padding against the head axis.
     q = torch.zeros(1, 8, 2, 128)
     cu = torch.tensor([0, 2])
+    global_cu = torch.tensor([0, 3, 4])
+    global_params = get_packed_params(global_cu, 4)
     context = object()
     ops.kda(q, q, q, q.transpose(1, 2), torch.zeros(1, 2, 8),
             head_major_qkv=True, cu_seqlens=cu, cu_seqlens_cpu=cu,
             cp_context=context, impl="ascendc_kda")
     assert captured["cp_context"] is context
     assert captured["cu_seqlens_cpu"] is cu
-    assert captured["packed_params"].cu_seqlens_list == [0, 2]
+    assert get_packed_params(global_cu, 4) is global_params
+    assert captured["cu_seqlens"] is cu
+    assert captured["packed_params"] is None
     assert captured["impl"] == "ascendc_kda"
+
+
+def test_kda_head_major_metadata_without_cp(fla_stub):
+    ops = get_or_create_ops(device_runtime=CpuRuntime())
+    q = torch.zeros(1, 8, 2, 128)
+    ops.kda(q, q, q, q.transpose(1, 2), torch.zeros(1, 2, 8),
+            head_major_qkv=True, cu_seqlens=torch.tensor([0, 1]))
+    assert fla_stub[0]["cu_seqlens"].tolist() == [0, 1, 2]
+
+
+def test_kda_cp_rejects_conflicting_metadata():
+    ops = get_or_create_ops(device_runtime=CpuRuntime())
+    q = torch.zeros(1, 8, 2, 128)
+    cu = torch.tensor([0, 2])
+    with pytest.raises(ValueError, match="either cu_seqlens or packed_params"):
+        ops.kda(q, q, q, q.transpose(1, 2), torch.zeros(1, 2, 8),
+                cu_seqlens=cu, packed_params=get_packed_params(cu, 2),
+                cp_context=object())

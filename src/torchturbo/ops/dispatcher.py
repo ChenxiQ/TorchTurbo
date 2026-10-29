@@ -434,12 +434,18 @@ class OpDispatcher:
         cp_context: Any = None,
         impl: str | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        boundary_kwargs = {}
         if cu_seqlens is not None:
             if packed_params is not None:
                 raise ValueError("pass either cu_seqlens or packed_params, not both")
-            seq_dim = 2 if head_major_qkv else 1
-            packed_params = get_packed_params(cu_seqlens, q.size(seq_dim), device=q.device)
-        boundary_kwargs = {}
+            if cp_context is not None:
+                # CP owns local boundaries; its provider validates coverage.
+                # Avoid evicting global convolution metadata from the cache
+                # or building generic chunk indices that CP never consumes.
+                boundary_kwargs["cu_seqlens"] = cu_seqlens
+            else:
+                seq_dim = 2 if head_major_qkv else 1
+                packed_params = get_packed_params(cu_seqlens, q.size(seq_dim), device=q.device)
         if cp_context is not None:
             boundary_kwargs["cp_context"] = cp_context
         if cu_seqlens_cpu is not None:

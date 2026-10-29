@@ -61,8 +61,11 @@ snapshot `fa5493f10e0bebe7a96ebcc81a4acf81d79f1e12`.
 
 The AscendC integration uses the shared attention hook, KDA wrapper,
 autograd function, `cp.py` state-exchange helper, and dispatcher facade.
-The facade forwards `cp_context` and `cu_seqlens_cpu`, and uses Q's sequence
-axis (axis 2 for head-major inputs) when normalizing packed metadata.
+The facade forwards `cp_context`, `cu_seqlens_cpu`, and CP-local
+`cu_seqlens` directly to the provider. The CP adapter validates that the
+local offsets match the context and cover Q's local tokens. Without CP,
+the facade uses Q's sequence axis (axis 2 for head-major inputs) when
+normalizing packed metadata.
 
 ```text
 local tokens, all heads
@@ -174,6 +177,78 @@ its results cannot be inferred from the AscendC regression.
 
 Hardware validation on `179.166.1.3` uses Ascend910B3. These tests do not
 certify full A3 model training, FSDP, activation checkpointing, the actual
-FLA norm, optimizer steps, or long-sequence gradient accuracy/performance.
+FLA norm, or optimizer steps. Long-sequence operator measurements and the
+remaining gradient accuracy failure are recorded below.
 The server's operator environment is Python 3.10 / torch 2.7.1; source-isolated
 fixtures do not meet the full model's Python >=3.11 / torch >=2.10 requirements.
+
+## Open precision issue: long packed sequences
+
+Status: unresolved, investigation deferred on 2026-10-29. Do not treat this
+branch as having passed full precision acceptance or loosen its tolerances.
+
+Reproducer: case31 with B=1, T=131072, H=32, K=V=128,
+global offsets `[0, 70290, 129130, 131072]`, seed 20261027, BF16 Q/K/V,
+FP32 raw gate and beta, zero A_log/dt_bias, all three fusions enabled,
+and `disable_recompute=True`. Reference: the single-rank AscendC operator,
+not an FP64 ground truth. CP partitions tokens into equal contiguous shards.
+
+| Mode | Forward + backward time | Precision against single rank |
+| --- | --- | --- |
+| No CP | 168.592 ms | Reference |
+| AllGather CP=2 | 117.949 ms | 16/16 rank/tensor checks pass |
+| AllGather CP=4 | 66.580 ms | 28/32 rank/tensor checks pass |
+
+Times include operator CP communication, but exclude model projections,
+convolution, Ulysses AllToAll, FSDP and optimizer steps. They are previous
+case31 measurements, not timings of the metadata-cache fix below.
+
+CP=4 fails `dA_log` elementwise tolerance (`atol=rtol=0.02`) on four unique
+heads: 13, 20, 25 and 26. Relative L2 is 0.27147%; maximum absolute error is
+0.559276. Output and the other gradients pass the configured checks.
+
+Evidence collected so far:
+
+- Rank 3 begins at token 98304, which is 46 tokens past the chunk grid
+  anchored at sequence start 70290. Moving only this diagnostic boundary
+  to 98322 makes all 32 checks pass. Unequal shards in this experiment are
+  not a production fix, and this does not establish accuracy for all lengths.
+- Fused normalization outputs and effective beta agree exactly at matching
+  tokens. The first observed same-semantic discrepancy is FwdPrepare's Aqk.
+  Forward FwdPrepare/FwdH rounding changes propagate into backward dg.
+- Reconstructing dA_log from dg agrees with the operator to about 3.5e-5;
+  the large discrepancy already exists upstream of the final reduction.
+- A continuous-state CPU replay that bypasses all three CP preprocessing/
+  merge operators and AllGather reproduces head 20's discrepancy: -0.56104
+  versus the measured -0.55928. An FP64 replay reduces the difference to
+  about 4.3e-6. This points to chunk-dependent finite-precision arithmetic
+  as the main source, not an established CP wiring error. Small contributions
+  from CP operators remain unquantified; they have not been fully exonerated.
+
+Detailed local evidence is archived as `kcp-stage-debug-20261029.zip`.
+No numerical workaround or kernel change is included in this review.
+
+## Integration review: packed metadata cache
+
+The KDA facade previously converted each newly allocated CP-local offsets
+tensor into generic PackedParams. This built unused device chunk indices
+and evicted convolution's global metadata from the shared single-entry
+cache on every layer. Subsequent layers rebuilt the global metadata and
+could repeat device-to-host synchronization for global offsets.
+
+CP-local offsets now go directly to the provider, preserving the global
+cache. Non-CP normalization and rejection of conflicting metadata remain
+unchanged. A regression test reproduces eviction before the fix and verifies
+cache reuse afterward. This is removal of redundant metadata work, not a
+measured end-to-end speedup or a fix for the open precision issue.
+
+Validation of this fix: 324 CPU tests passed, 7 skipped and 3 expected
+failures. On Ascend910B3, the two-rank actual-source layer fixture passed
+36/36 checks against Ulysses and 36/36 against a single-rank layer. The
+CP-disabled control passed 36/36 with exact equality. Output and
+`o_proj.weight` gradients remain exactly equal to Ulysses. These small
+fixture results do not supersede the long-sequence failure above.
+
+The remaining convolution head-divisibility restriction, extra inverse QKV
+AllToAll, and equal contiguous token partitioning are explicit limitations
+of this connectivity design. The customer's Triton forward is unchanged.
