@@ -1,5 +1,6 @@
 """Shared training attention adapters for Bailing text and vision-language models."""
 
+import os
 from typing import Any
 
 import torch
@@ -35,6 +36,9 @@ def patch_kda_forward(
     launches right after its projection and records an event on that
     stream, so its convolution waits only on that gather and overlaps the
     exchanges still in flight.
+
+    With TORCHTURBO_KDA_CP=allgather, convolution keeps this layout while
+    KDA runs on local tokens and all heads after an inverse exchange.
     """
     from fla.modules.fused_norm_gate import rms_norm_gated
 
@@ -44,6 +48,13 @@ def patch_kda_forward(
     )
     from torchturbo.ops import ops
     from torchturbo.ops.packed_params import get_packed_params
+
+    cp_mode = os.environ.get("TORCHTURBO_KDA_CP", "none").lower()
+    if cp_mode not in ("none", "allgather"):
+        raise ValueError("TORCHTURBO_KDA_CP must be 'none' or 'allgather'.")
+    use_cp = cp_mode == "allgather" and sp_size > 1
+    if use_cp:
+        from torchturbo.ops.providers.npu._fla_npu_kda import KDAContextParallel
 
     a2a_stream = None
     qkv_events = None
@@ -102,6 +113,18 @@ def patch_kda_forward(
         if packed_params is not None:
             cu_seqlens = packed_params.cu_seqlens
 
+        kda_kwargs = {}
+        if use_cp:
+            if self.num_heads % sp_size:
+                raise ValueError("KDA CP's convolution bridge requires heads divisible by SP size.")
+            offsets = (packed_params.cu_seqlens_list if packed_params is not None
+                       else [0, q_len * sp_size])
+            cp_context = KDAContextParallel.from_global_offsets(offsets, q_len, sp_group)
+            cu_seqlens = torch.tensor(cp_context.cu_seqlens, dtype=torch.int64)
+            kda_kwargs.update(
+                impl="ascendc_kda", cp_context=cp_context, cu_seqlens_cpu=cu_seqlens,
+            )
+
         # Each gather launches right after its projection so the exchanges
         # pipeline against the remaining projections and convolutions; the
         # event recorded behind a gather marks its completion, and only its
@@ -138,7 +161,7 @@ def patch_kda_forward(
         # KDA owns the sigmoid (in-kernel on AscendC, in the native adapter
         # for triton), so hand it raw logits.
         beta = self.b_proj(hidden_states).float()
-        if sp_size > 1:
+        if sp_size > 1 and not use_cp:
             # Launched before the convolutions so these small exchanges
             # finish while the convolutions run; the wait at the chunk
             # consumer below covers them.
@@ -200,10 +223,20 @@ def patch_kda_forward(
             head_num=v_heads,
         )
 
+        if use_cp:
+            # Convolution has handled global packed boundaries. Restore all
+            # heads for this rank's contiguous sequence shard before KDA.
+            q, k, v = (
+                gather_heads_scatter_seq(
+                    tensor, seq_dim=2, head_dim=1, sp_group=sp_group, sp_size=sp_size,
+                )
+                for tensor in (q, k, v)
+            )
+
         # q/k/v already come back head-first; only the gate needs the split.
         g = g.unflatten(-1, (-1, self.head_dim))
 
-        if sp_size > 1:
+        if sp_size > 1 and not use_cp:
             # Covers the gate/beta gathers trailing the QKV ones on the
             # shared stream.
             get_device_runtime().current_stream().wait_stream(a2a_stream)
@@ -230,7 +263,7 @@ def patch_kda_forward(
             A_log=A_log_local,
             dt_bias=dt_bias_local,
             initial_state=None,
-            output_final_state=True,
+            output_final_state=not use_cp,
             use_qk_l2norm_in_kernel=True,
             use_beta_sigmoid_in_kernel=True,
             use_gate_in_kernel=True,
@@ -239,9 +272,10 @@ def patch_kda_forward(
             cu_seqlens=cu_seqlens,
             disable_recompute=True,
             head_major_qkv=True,
+            **kda_kwargs,
         )
 
-        if sp_size > 1:
+        if sp_size > 1 and not use_cp:
             # o: [B, T, H/sp, V] -> [B, T/sp, H, V]. The scatter runs on
             # the shared a2a stream; the gather-side exchanges return
             # contiguous views, but this scattered layout needs an extra

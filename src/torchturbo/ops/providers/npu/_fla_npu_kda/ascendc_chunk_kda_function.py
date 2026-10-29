@@ -19,7 +19,9 @@ With use_beta_sigmoid_in_kernel=True, beta must contain raw logits. Forward
 exports FP32 effective beta; backward consumes it for the sigmoid derivative.
 
 The public wrapper requires disable_recompute=True and forwards the fusion
-flags. The model passes raw beta when sigmoid fusion is enabled.
+flags. The model passes raw beta when sigmoid fusion is enabled. With an
+AllGather CP context, forward uses split stages and backward supplies the
+internal cross-rank dht to Dhu; output layout and gradient restoration are shared.
 """
 
 from __future__ import annotations
@@ -213,7 +215,7 @@ class AscendCChunkKDAFunction(torch.autograd.Function):
 
         # Saved-value outlets are head-major even when forward input is BSND.
         q_hat, k_hat, q_rstd, k_rstd = None, None, None, None
-        if use_qk_l2norm_in_kernel:
+        if use_qk_l2norm_in_kernel and cp_context is None:
             q_shape = q_in.shape if head_major_qkv else (
                 q_in.shape[0], q_in.shape[2], q_in.shape[1], q_in.shape[3]
             )
@@ -226,39 +228,50 @@ class AscendCChunkKDAFunction(torch.autograd.Function):
             k_rstd = torch.empty(k_shape[:-1], dtype=torch.float32, device=k.device)
 
         beta_eff = None
-        if use_beta_sigmoid_in_kernel:
+        if use_beta_sigmoid_in_kernel and cp_context is None:
             beta_shape = beta_in.shape if head_major_qkv else (
                 beta_in.shape[0], beta_in.shape[2], beta_in.shape[1]
             )
             beta_eff = torch.empty(beta_shape, dtype=torch.float32, device=beta.device)
 
-        outputs = list(
-            npu_chunk_kda_fwd(
-                q_in, k_in, v_in, g_in, beta_in, scale, chunk_size,
-                layout=layout,
-                initial_state=initial_state,
-                output_final_state=bool(output_final_state),
-                cu_seqlens=cu_host,
-                chunk_indices=None,  # derived internally from host metadata
-                safe_gate=bool(safe_gate),
-                lower_bound=lower_bound,
-                use_gate_in_kernel=bool(use_gate_in_kernel),
+        if cp_context is not None:
+            from .cp import cp_forward
+
+            outputs, q_hat, k_hat, q_rstd, k_rstd, beta_eff = cp_forward(
+                cp_context, q_in, k_in, v_in, g_in, beta_in, scale,
+                safe_gate=bool(safe_gate), lower_bound=lower_bound,
                 A_log=_gate_parameter_for_ascendc(A_log),
                 dt_bias=_gate_parameter_for_ascendc(dt_bias),
-                disable_recompute=export_intermediates,
-                return_intermediate_states=False,
-                state_v_first=False,
-                use_qk_l2norm_in_kernel=bool(use_qk_l2norm_in_kernel),
-                q_hat_out=q_hat,
-                k_hat_out=k_hat,
-                q_rstd_out=q_rstd,
-                k_rstd_out=k_rstd,
-                use_beta_sigmoid_in_kernel=bool(use_beta_sigmoid_in_kernel),
                 allow_neg_eigval=bool(allow_neg_eigval),
-                beta_eff_out=beta_eff,
-                use_exp2=True,
             )
-        )
+        else:
+            outputs = list(
+                npu_chunk_kda_fwd(
+                    q_in, k_in, v_in, g_in, beta_in, scale, chunk_size,
+                    layout=layout,
+                    initial_state=initial_state,
+                    output_final_state=bool(output_final_state),
+                    cu_seqlens=cu_host,
+                    chunk_indices=None,  # derived internally from host metadata
+                    safe_gate=bool(safe_gate),
+                    lower_bound=lower_bound,
+                    use_gate_in_kernel=bool(use_gate_in_kernel),
+                    A_log=_gate_parameter_for_ascendc(A_log),
+                    dt_bias=_gate_parameter_for_ascendc(dt_bias),
+                    disable_recompute=export_intermediates,
+                    return_intermediate_states=False,
+                    state_v_first=False,
+                    use_qk_l2norm_in_kernel=bool(use_qk_l2norm_in_kernel),
+                    q_hat_out=q_hat,
+                    k_hat_out=k_hat,
+                    q_rstd_out=q_rstd,
+                    k_rstd_out=k_rstd,
+                    use_beta_sigmoid_in_kernel=bool(use_beta_sigmoid_in_kernel),
+                    allow_neg_eigval=bool(allow_neg_eigval),
+                    beta_eff_out=beta_eff,
+                    use_exp2=True,
+                )
+            )
         if len(outputs) != 12:
             raise RuntimeError(
                 f"fla_npu chunk_kda_fwd returned {len(outputs)} values; expected 12."
@@ -304,6 +317,7 @@ class AscendCChunkKDAFunction(torch.autograd.Function):
             gk, Aqk, Akk, w, qg, kg, v_new, h,
         )
         ctx.cu_host = cu_host
+        ctx.cp_context = cp_context
         ctx.is_varlen = is_varlen
         ctx.head_major_qkv = bool(head_major_qkv)
         ctx.export_intermediates = export_intermediates
@@ -331,10 +345,8 @@ class AscendCChunkKDAFunction(torch.autograd.Function):
         (q_hat, q_rstd, k_hat, k_rstd, v_in, g_in, beta_in, A_log, dt_bias,
          gk, Aqk, Akk, w, qg, kg, v_new, h) = ctx.saved_tensors
 
-        # NOTE on dht: the engine materialises a ZERO gradient for the
-        # (production-wise discarded) final_state even when it is unused.
-        # The fused backward takes no dht; gradients w.r.t. final_state are
-        # unsupported and silently ignored.
+        # External final-state gradients remain unsupported on the single-rank
+        # path. CP exposes no final state; its internal dht is exchanged below.
         if gk is None:
             raise RuntimeError(
                 "ascendc_chunk_kda: the fused backward requires the "
@@ -387,9 +399,18 @@ class AscendCChunkKDAFunction(torch.autograd.Function):
         if is_varlen:
             scan_inputs = tuple(t.unsqueeze(0) for t in scan_inputs)
         qg_scan, kg_scan, w_scan, do_scan, dv_scan_in, gk_scan = scan_inputs
+        boundary_kwargs = {}
+        if ctx.cp_context is not None:
+            from .cp import cp_backward_boundary
+
+            boundary_kwargs["dht"] = cp_backward_boundary(
+                ctx.cp_context, qg_scan, kg_scan, w_scan, do_scan, dv_scan_in,
+                gk_scan, ctx.scale,
+            )
         dh, dh0, dv_scan = npu_chunk_gated_delta_rule_bwd_dhu(
             qg_scan, kg_scan, w_scan, do_scan, dv_scan_in, ctx.scale, ctx.chunk_size,
             gK=gk_scan, cu_seqlens=cu_host, chunk_indices=chunk_indices, use_exp2=True,
+            **boundary_kwargs,
         )
         if is_varlen:
             dh, dv_scan = dh.squeeze(0), dv_scan.squeeze(0)

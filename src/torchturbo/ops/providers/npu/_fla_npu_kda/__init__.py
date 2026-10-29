@@ -15,7 +15,8 @@ time-first ``[B, T, H, D]`` or, with ``head_major_qkv=True``, the head-first
 keeps the whole Q/K/V path free of layout transposes.  Both packed varlen
 (``cu_seqlens`` given) and dense (``cu_seqlens=None``) inputs are supported.
 
-Unsupported configurations (CP context, inference intermediate states,
+AllGather CP accepts a KDAContextParallel context with local packed boundaries.
+Unsupported configurations (inference intermediate states,
 V-first state layout, GVA,
 initial_state, chunk_size != 64, disable_recompute=False) are rejected before
 any AscendC kernel is launched.  The ops dispatcher selects an implementation
@@ -28,9 +29,11 @@ from __future__ import annotations
 import torch
 
 from .ascendc_chunk_kda_function import AscendCChunkKDAFunction
+from .cp import KDAContextParallel
 
 __all__ = [
     "AscendCChunkKDAFunction",
+    "KDAContextParallel",
     "ascendc_chunk_kda",
 ]
 
@@ -58,6 +61,7 @@ def ascendc_chunk_kda(
     head_major_qkv: bool = False,
     use_beta_sigmoid_in_kernel: bool = False,
     allow_neg_eigval: bool = False,
+    cp_context: KDAContextParallel | None = None,
     **kwargs,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
     """Drop-in full-AscendC replacement for ``fla.ops.kda.chunk_kda``.
@@ -78,13 +82,13 @@ def ascendc_chunk_kda(
     ``disable_recompute`` must be ``True``: the fused AscendC backward only
     consumes forward-saved caches (see the check below).  Run the triton
     provider with the same value so both paths stay in one memory regime.
-    ``output_final_state`` is honoured, but gradients w.r.t. final_state are
-    NOT supported: the fused backward takes no dht.
+    Without CP, ``output_final_state`` is honoured, but gradients w.r.t.
+    final_state are NOT supported. CP uses internal boundary states and
+    requires ``output_final_state=False``.
     """
     if allow_neg_eigval and not use_beta_sigmoid_in_kernel:
         raise ValueError("allow_neg_eigval=True requires beta sigmoid fusion.")
     for unsupported in (
-        "cp_context",
         "return_intermediate_states",
     ):
         if kwargs.pop(unsupported, False):
@@ -127,10 +131,9 @@ def ascendc_chunk_kda(
             "triton provider as well so both paths stay comparable."
         )
     if initial_state is not None:
-        # The fused backward rejects initial_state/dht outright.
         raise ValueError(
-            "ascendc_chunk_kda does not support initial_state (the fused "
-            "AscendC backward has no state gradient path)."
+            "ascendc_chunk_kda does not support user-supplied initial_state "
+            "in this training adapter."
         )
     if q.shape[0] != 1:
         # Production always runs B=1 (one packed sequence per micro-batch).
@@ -151,6 +154,22 @@ def ascendc_chunk_kda(
 
     if scale is None:
         scale = q.shape[-1] ** -0.5
+
+    if cp_context is not None:
+        if not isinstance(cp_context, KDAContextParallel):
+            raise ValueError("cp_context must be a KDAContextParallel instance.")
+        if not head_major_qkv or not all((use_qk_l2norm_in_kernel,
+                                         use_beta_sigmoid_in_kernel, use_gate_in_kernel)):
+            raise ValueError("KDA CP requires head-major Q/K/V and fused L2, sigmoid and gate.")
+        if q.dtype != torch.bfloat16 or q.shape[-1] != 128 or v.shape[-1] != 128:
+            raise ValueError("KDA CP currently supports BF16 and key/value dimensions 128.")
+        if output_final_state:
+            raise ValueError("KDA CP does not expose global final states; set output_final_state=False.")
+        if cu_seqlens is None or q.shape[2] != cp_context.cu_seqlens[-1]:
+            raise ValueError("KDA CP requires local packed offsets covering the local Q/K/V tokens.")
+        src = cu_seqlens_cpu if cu_seqlens_cpu is not None else cu_seqlens
+        if tuple(src.detach().cpu().tolist()) != cp_context.cu_seqlens:
+            raise ValueError("KDA CP cu_seqlens must match the context's local packed offsets.")
 
     # ``disable_recompute=True`` means the fused backward consumes the
     # forward's saved caches, so they must be exported whenever a backward can
@@ -190,7 +209,7 @@ def ascendc_chunk_kda(
         chunk_size,
         disable_recompute,
         False,  # return_intermediate_states
-        None,   # cp_context
+        cp_context,
         bool(head_major_qkv),
         export_intermediates,
     )
