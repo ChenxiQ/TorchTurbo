@@ -1,6 +1,5 @@
 """Shared training attention adapters for Bailing text and vision-language models."""
 
-import os
 from typing import Any
 
 import torch
@@ -27,6 +26,7 @@ def patch_kda_forward(
     sp_size: int,
     sp_rank: int,
     use_fla_kcp: bool = False,
+    use_fla_kcp_ascend: bool = False,
 ) -> None:
     """Install packed KDA training with Ulysses or FLA context parallelism.
 
@@ -38,7 +38,7 @@ def patch_kda_forward(
     stream, so its convolution waits only on that gather and overlaps the
     exchanges still in flight.
 
-    With TORCHTURBO_KDA_CP=allgather, convolution keeps this layout while
+    With use_fla_kcp_ascend=True, convolution keeps this layout while
     KDA runs on local tokens and all heads after an inverse exchange.
     use_fla_kcp selects FLA's local convolution and Triton KDA CP path.
     """
@@ -51,16 +51,13 @@ def patch_kda_forward(
     from torchturbo.ops import ops
     from torchturbo.ops.packed_params import get_packed_params
 
-    cp_mode = os.environ.get("TORCHTURBO_KDA_CP", "none").lower()
-    if cp_mode not in ("none", "allgather"):
-        raise ValueError("TORCHTURBO_KDA_CP must be 'none' or 'allgather'.")
-    if use_fla_kcp and cp_mode == "allgather":
+    if use_fla_kcp and use_fla_kcp_ascend:
         raise ValueError(
-            "use_fla_kcp and TORCHTURBO_KDA_CP=allgather select different "
+            "use_fla_kcp and use_fla_kcp_ascend select different "
             "CP backends; enable only one."
         )
-    use_cp = cp_mode == "allgather" and sp_size > 1
-    if use_cp:
+    use_ascendc_cp = use_fla_kcp_ascend and sp_size > 1
+    if use_ascendc_cp:
         from torchturbo.ops.providers.npu._fla_npu_kda import KDAContextParallel
 
     a2a_stream = None
@@ -121,7 +118,7 @@ def patch_kda_forward(
             cu_seqlens = packed_params.cu_seqlens
 
         kda_kwargs = {}
-        if use_cp:
+        if use_ascendc_cp:
             if self.num_heads % sp_size:
                 raise ValueError("KDA CP's convolution bridge requires heads divisible by SP size.")
             offsets = (packed_params.cu_seqlens_list if packed_params is not None
@@ -168,7 +165,7 @@ def patch_kda_forward(
         # KDA owns the sigmoid (in-kernel on AscendC, in the native adapter
         # for triton), so hand it raw logits.
         beta = self.b_proj(hidden_states).float()
-        if sp_size > 1 and not use_cp:
+        if sp_size > 1 and not use_ascendc_cp:
             # Launched before the convolutions so these small exchanges
             # finish while the convolutions run; the wait at the chunk
             # consumer below covers them.
@@ -230,7 +227,7 @@ def patch_kda_forward(
             head_num=v_heads,
         )
 
-        if use_cp:
+        if use_ascendc_cp:
             # Convolution has handled global packed boundaries. Restore all
             # heads for this rank's contiguous sequence shard before KDA.
             q, k, v = (
@@ -243,7 +240,7 @@ def patch_kda_forward(
         # q/k/v already come back head-first; only the gate needs the split.
         g = g.unflatten(-1, (-1, self.head_dim))
 
-        if sp_size > 1 and not use_cp:
+        if sp_size > 1 and not use_ascendc_cp:
             # Covers the gate/beta gathers trailing the QKV ones on the
             # shared stream.
             get_device_runtime().current_stream().wait_stream(a2a_stream)
@@ -270,7 +267,7 @@ def patch_kda_forward(
             A_log=A_log_local,
             dt_bias=dt_bias_local,
             initial_state=None,
-            output_final_state=not use_cp,
+            output_final_state=not use_ascendc_cp,
             use_qk_l2norm_in_kernel=True,
             use_beta_sigmoid_in_kernel=True,
             use_gate_in_kernel=True,
@@ -282,7 +279,7 @@ def patch_kda_forward(
             **kda_kwargs,
         )
 
-        if sp_size > 1 and not use_cp:
+        if sp_size > 1 and not use_ascendc_cp:
             # o: [B, T, H/sp, V] -> [B, T/sp, H, V]. The scatter runs on
             # the shared a2a stream; the gather-side exchanges return
             # contiguous views, but this scattered layout needs an extra

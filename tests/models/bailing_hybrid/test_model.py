@@ -238,7 +238,6 @@ def test_ulysses_ordinary_batches_use_fixed_length_convolution(monkeypatch, fla_
 
 @pytest.fixture
 def fla_cp_stubs(monkeypatch):
-    monkeypatch.delenv("TORCHTURBO_KDA_CP", raising=False)
     for name in ("fla", "fla.ops", "fla.modules"):
         monkeypatch.setitem(sys.modules, name, SimpleNamespace(__path__=[]))
     cp = SimpleNamespace(build_cp_context=lambda *args, **kwargs: None)

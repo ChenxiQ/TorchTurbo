@@ -172,14 +172,15 @@ def main() -> None:
         reference = ReferenceLayer().to(device="npu", dtype=torch.bfloat16)
         parallel = ParallelLayer().to(device="npu", dtype=torch.bfloat16)
         parallel.load_state_dict(reference.state_dict())
-        os.environ["TORCHTURBO_KDA_CP"] = "none"
         distributed_reference = args.reference_mode == "ulysses"
         attention.patch_kda_forward(
             ReferenceLayer, group if distributed_reference else None,
             size if distributed_reference else 1, rank if distributed_reference else 0,
         )
-        os.environ["TORCHTURBO_KDA_CP"] = args.parallel_mode
-        attention.patch_kda_forward(ParallelLayer, group, size, rank)
+        attention.patch_kda_forward(
+            ParallelLayer, group, size, rank,
+            use_fla_kcp_ascend=args.parallel_mode == "allgather",
+        )
         gen = torch.Generator().manual_seed(41)
         source = torch.randn(1, 512, 64, generator=gen).bfloat16().to("npu")
         do = torch.randn(1, 512, 64, generator=gen).bfloat16().to("npu")

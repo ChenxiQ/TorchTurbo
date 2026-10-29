@@ -15,7 +15,6 @@ from torchturbo.runtime.cpu import CpuRuntime
 
 @pytest.fixture
 def fla_calls(monkeypatch):
-    monkeypatch.delenv("TORCHTURBO_KDA_CP", raising=False)
     calls = {"context": [], "conv": [], "kda": []}
     for name in ("fla", "fla.ops", "fla.modules"):
         monkeypatch.setitem(sys.modules, name, SimpleNamespace(__path__=[]))
@@ -91,6 +90,6 @@ def test_fla_kcp_preserves_local_tokens_and_full_heads(fla_calls, sp_size, no_kd
 
 
 def test_cp_backend_switches_are_mutually_exclusive(fla_calls, monkeypatch):
-    monkeypatch.setenv("TORCHTURBO_KDA_CP", "allgather")
     with pytest.raises(ValueError, match="enable only one"):
-        attention.patch_kda_forward(nn.Module, object(), 2, 0, use_fla_kcp=True)
+        attention.patch_kda_forward(nn.Module, object(), 2, 0,
+                                    use_fla_kcp=True, use_fla_kcp_ascend=True)

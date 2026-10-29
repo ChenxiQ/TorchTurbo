@@ -19,6 +19,8 @@ engine_config:
   parallel_plan:
     # FLA Triton KDA/conv context parallelism, using the existing SP group.
     use_fla_kcp: false
+    # AscendC AllGather KCP; mutually exclusive with use_fla_kcp.
+    use_fla_kcp_ascend: false
     sp_size: 1
     ep_size: 1
     # Example FQN patches. Adjust these patterns to match the target model.

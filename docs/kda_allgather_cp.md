@@ -11,29 +11,22 @@ convolution CP support are integrated alongside the AscendC path.
 
 ## Choose a backend
 
-| Mode | `parallel_plan.use_fla_kcp` | `TORCHTURBO_KDA_CP` |
+| Mode | `parallel_plan.use_fla_kcp` | `parallel_plan.use_fla_kcp_ascend` |
 | --- | --- | --- |
-| Baseline Ulysses | `false` | unset or `none` |
-| FLA Triton KCP | `true` | unset or `none` |
-| AscendC AllGather CP | `false` | `allgather` |
+| Baseline Ulysses | `false` | `false` |
+| FLA Triton KCP | `true` | `false` |
+| AscendC AllGather CP | `false` | `true` |
 
-Both CP modes reuse the existing SP group and size. Enabling both switches
-raises before either communication path is installed. With `sp_size=1`, the
-FSDP backend disables KCP and preserves the normal single-rank dispatch.
+Both booleans default to false and reuse the existing SP group and size.
+Enabling both raises a configuration error. With sp_size=1, the FSDP backend
+preserves normal single-rank dispatch. Both settings flow through the engine
+plan, backend SP information and model hook.
 
-The customer option supports the same public inputs as the source commit:
-
-```yaml
-engine_config:
-  parallel_plan:
-    sp_size: 2
-    use_fla_kcp: true
-```
-
-Equivalent explicit CLI selection is `--tt_use_fla_kcp true`; the environment
-input is `TORCH_TURBO_USE_FLA_KCP=true`. Existing precedence is CLI > file >
-environment > argument defaults. Set the AscendC switch to `none` or unset
-it when selecting Triton.
+CLI flags are `--tt_use_fla_kcp true` and `--tt_use_fla_kcp_ascend true`.
+Registered environment inputs are `TORCH_TURBO_USE_FLA_KCP=true` and
+`TORCH_TURBO_USE_FLA_KCP_ASCEND=true`. Precedence is CLI > file > environment
+> argument defaults. The model no longer reads the old
+`TORCHTURBO_KDA_CP=allgather` variable; migrate to the boolean setting.
 
 Triton KCP builds FLA's context from global packed offsets, runs local
 full-head convolution with CP halo exchange, and dispatches KDA explicitly
@@ -48,21 +41,16 @@ impose their own SP divisibility constraints.
 
 ## Enable AscendC AllGather
 
-```bash
-export TORCHTURBO_KDA_CP=allgather
-# Launch the existing training command with sp_size=2, 4, or 8.
+```yaml
+engine_config:
+  parallel_plan:
+    sp_size: 2
+    use_fla_kcp: false
+    use_fla_kcp_ascend: true
 ```
 
-Set the switch before the model parallelization hook runs. It reuses the
-previous CP bridge's switch and the existing `sp_group`/`sp_size`; there is
-no new engine configuration or independent CP mesh. The old
-`TORCHTURBO_KDA_ASCENDC` switch is not needed by this baseline, which uses
-`ops.kda`. CP explicitly passes `impl="ascendc_kda"` to the dispatcher.
-A missing AscendC provider fails instead of falling back to Triton with an
-incompatible CP context.
-
-Unset `TORCHTURBO_KDA_CP` or set it to `none` to use the baseline Ulysses
-path. With `sp_size=1`, the baseline single-rank dispatch is unchanged.
+Set both booleans to false for the baseline Ulysses path. AscendC CP uses
+AllGather internally and explicitly selects `impl="ascendc_kda"`.
 The hook is shared by Bailing hybrid text and Bailing V3 VL. MLA is unchanged.
 
 Use a `fla_npu` wheel containing the split KDA forward/backward and CP

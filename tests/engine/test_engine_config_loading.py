@@ -86,6 +86,20 @@ def test_fla_kcp_config_reaches_model_plan(tmp_path, monkeypatch):
     assert plan.sp_size == 2
 
 
+def test_fla_kcp_config_reaches_model_plan_ascend(tmp_path, monkeypatch):
+    assert build_from_args(TorchTurboArgs()).parallel_plan.use_fla_kcp_ascend is False
+    monkeypatch.setenv("TORCH_TURBO_USE_FLA_KCP_ASCEND", "true")
+    assert _build_from_argv([]).parallel_plan.use_fla_kcp_ascend is True
+    path = _write(tmp_path, "kcp.yaml", _engine_config(
+        "parallel_plan:\n  sp_size: 2\n  use_fla_kcp_ascend: false\n"
+    ))
+    assert _build_from_argv(["--tt_config", path]).parallel_plan.use_fla_kcp_ascend is False
+    config = _build_from_argv(["--tt_config", path, "--tt_use_fla_kcp_ascend", "true"])
+    plan = _resolve_engine_plan(config)
+    assert plan.use_fla_kcp_ascend is True
+    assert plan.sp_size == 2
+
+
 class _FakeQwen35Moe(TurboModel):
     """Model whose default plan mirrors ``qwen3_5_moe.parallel_plan``."""
 
