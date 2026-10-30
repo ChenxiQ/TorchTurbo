@@ -331,10 +331,15 @@ class AscendCChunkKDAFunction(torch.autograd.Function):
         (q_hat, q_rstd, k_hat, k_rstd, v_in, g_in, beta_in, A_log, dt_bias,
          gk, Aqk, Akk, w, qg, kg, v_new, h) = ctx.saved_tensors
 
-        # NOTE on dht: the engine materialises a ZERO gradient for the
-        # (production-wise discarded) final_state even when it is unused.
-        # The fused backward takes no dht; gradients w.r.t. final_state are
-        # unsupported and silently ignored.
+        # Guard: the fused backward has no path through final_state.  The
+        # engine hands back a zero gradient for the discarded output; a real
+        # one means the caller's loss depends on final_state and cannot be
+        # served here.
+        if dht is not None and bool(dht.any()):
+            raise RuntimeError(
+                "ascendc_chunk_kda: got a non-zero gradient for final_state; "
+                "the fused backward does not support gradients w.r.t. it."
+            )
         if gk is None:
             raise RuntimeError(
                 "ascendc_chunk_kda: the fused backward requires the "
