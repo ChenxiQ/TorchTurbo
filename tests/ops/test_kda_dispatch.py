@@ -51,10 +51,11 @@ def test_kda_provider_modules_are_discovered():
 
     assert "torchturbo.ops.providers.native.kda" in cpu_modules
     assert "torchturbo.ops.providers.npu.kda" in npu_modules
-    # The vendored adapter package is underscore-prefixed, so provider
-    # discovery must keep skipping it.
+    # The vendored GDN adapter package is underscore-prefixed, so provider
+    # discovery must keep skipping it (the KDA adapter lives inside
+    # providers/npu/kda.py itself now).
     assert not any(
-        module.startswith("torchturbo.ops.providers.npu._fla_npu_kda")
+        module.startswith("torchturbo.ops.providers.npu._fla_gdn")
         for module in npu_modules
     )
 
