@@ -1,0 +1,60 @@
+src/torchturbo/ops/providers/native/kda.py
+  s_889f5f10e81f32::t_87bba682aa69bf 38-39
+  s_889f5f10e81f32::t_bb67fcafc655b6 40-41
+  s_889f5f10e81f32::t_1af250fb20276f 42
+src/torchturbo/ops/providers/npu/kda.py
+  s_889f5f10e81f32::t_77e6d714a94f89 372-373
+  s_889f5f10e81f32::t_5b0100bd9a8fce 320
+  s_889f5f10e81f32::t_bf6f16eb0bee6f 524-526
+  s_889f5f10e81f32::t_88ef5357c20818 417
+  s_889f5f10e81f32::t_b26c80e02ad84c 573
+  s_889f5f10e81f32::t_fd3afe7e3c28bc 574
+  s_889f5f10e81f32::t_53012d0058f37f 210-211
+  s_889f5f10e81f32::t_eb8e0afd22c08c 470
+  s_889f5f10e81f32::t_941085a2a791b3 183
+  s_889f5f10e81f32::t_4624e2ddd5cca6 449-452,473-474
+  s_889f5f10e81f32::t_9cc4d2a1856322 414
+  s_889f5f10e81f32::t_b3d9a554b36bbd 184-186
+src/torchturbo/models/bailing_hybrid/attention.py
+  s_889f5f10e81f32::t_df5c7d2aaf9e66 241
+  s_889f5f10e81f32::t_40f37be31da650 152
+  s_889f5f10e81f32::t_806f99856af6a8 153
+  s_889f5f10e81f32::t_b26ce4df77f88b 224-225
+tests/ops/npu/test_kda.py
+  s_889f5f10e81f32::t_e86fabc366e60d 6-7,70
+tests/models/test_bailing_attention.py
+  s_889f5f10e81f32::t_391e6afbc6adef 224-228,231-237
+  s_889f5f10e81f32::t_684ff08545731a 53,58,63,68-69,85-86,112-116,118
+  s_889f5f10e81f32::t_cf66928755390a 117
+tests/ops/test_kda_dispatch.py
+  s_889f5f10e81f32::t_b2ab81b8a45916 87,90-92
+  s_889f5f10e81f32::t_711b6c3efa1d5a 79-80,83
+  s_889f5f10e81f32::t_f7b33fa1d47735 19-22,71,74-75,78,84-86,88-89
+src/torchturbo/ops/base.py
+  s_889f5f10e81f32::t_3b672819be5e8e 49
+  s_889f5f10e81f32::t_9b0e4f6df2f696 48
+  s_889f5f10e81f32::t_f879cc9394f1bb 50
+tests/models/bailing_hybrid/test_packed_attention_mask.py
+  s_889f5f10e81f32::t_e7f49cb48c1408 49
+  s_889f5f10e81f32::t_0b934c3061c628 40-48,50
+src/torchturbo/ops/dispatcher.py
+  s_889f5f10e81f32::t_ff4acb3a77e638 460,465-466
+  s_889f5f10e81f32::t_29a5349799b475 468
+  s_889f5f10e81f32::t_85133bb41ab9a6 458-459,461-464,467
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3947ec3bfb0d85347c3c5d56396b057cf52b54b2",
+  "prompts": {},
+  "sessions": {
+    "s_889f5f10e81f32": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "bf049490-a489-4f6b-af7b-92c77df91738",
+        "model": "glink/GLM-5.3:glink_domestic"
+      },
+      "human_author": "Chenxi Qian <chenxi.qian.cq@outlook.com>"
+    }
+  }
+}
