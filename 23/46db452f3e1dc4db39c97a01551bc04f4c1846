@@ -1,0 +1,54 @@
+src/torchturbo/ops/providers/npu/kda.py
+  s_889f5f10e81f32::t_53012d0058f37f 211-212
+  s_889f5f10e81f32::t_03e42766ed43ad 587-589
+  s_889f5f10e81f32::t_61143dcee28077 620-624
+  s_889f5f10e81f32::t_4624e2ddd5cca6 456-459,484-485
+  s_889f5f10e81f32::t_eb8e0afd22c08c 477-481
+  s_889f5f10e81f32::t_fd3afe7e3c28bc 590
+  s_889f5f10e81f32::t_bf6f16eb0bee6f 535-537
+  s_889f5f10e81f32::t_88ef5357c20818 420-421,424
+tests/models/bailing_hybrid/test_packed_attention_mask.py
+  s_889f5f10e81f32::t_0b934c3061c628 40-50
+tests/ops/test_kda_dispatch.py
+  s_889f5f10e81f32::t_711b6c3efa1d5a 80-81,84
+  s_889f5f10e81f32::t_f7b33fa1d47735 19-23,72,75-76,79,85-93
+tests/models/test_bailing_attention.py
+  s_889f5f10e81f32::t_391e6afbc6adef 224-228,231-241
+  s_889f5f10e81f32::t_684ff08545731a 53,58,63,68-69,85-86,112-118
+src/torchturbo/ops/dispatcher.py
+  s_889f5f10e81f32::t_ff4acb3a77e638 458-467
+  s_889f5f10e81f32::t_c42d6453f81346 468
+  s_889f5f10e81f32::t_29a5349799b475 469
+src/torchturbo/ops/__init__.py
+  s_889f5f10e81f32::t_061242add0e0e5 13-17,26-27
+src/torchturbo/ops/base.py
+  s_889f5f10e81f32::t_a0b956e6038cd5 48-50,53-54
+  s_889f5f10e81f32::t_f879cc9394f1bb 51-52,55
+src/torchturbo/models/bailing_hybrid/attention.py
+  s_889f5f10e81f32::t_a4d5481cf615dc 230-231
+  s_889f5f10e81f32::t_df5c7d2aaf9e66 228-229,247
+  s_889f5f10e81f32::t_88fa03c4018730 157
+  s_889f5f10e81f32::t_794c362fc0f9ff 45
+  s_889f5f10e81f32::t_1a5f7a36cb5cc2 138
+  s_889f5f10e81f32::t_5c9722fac5c1d4 154-156
+src/torchturbo/ops/providers/native/kda.py
+  s_889f5f10e81f32::t_bb67fcafc655b6 38-46,53-55
+tests/ops/npu/test_kda.py
+  s_889f5f10e81f32::t_e86fabc366e60d 6-7,70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2346db452f3e1dc4db39c97a01551bc04f4c1846",
+  "prompts": {},
+  "sessions": {
+    "s_889f5f10e81f32": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "bf049490-a489-4f6b-af7b-92c77df91738",
+        "model": "glink/GLM-5.3:glink_domestic"
+      },
+      "human_author": "Chenxi Qian <chenxi.qian.cq@outlook.com>"
+    }
+  }
+}
