@@ -1,0 +1,22 @@
+tests/ops/npu/test_kda.py
+  s_9efb74ace785ba::t_e633c61c327a93 6
+  s_9efb74ace785ba::t_c724ca27839562 1-4,7
+src/torchturbo/models/bailing_hybrid/attention.py
+  s_9efb74ace785ba::t_c4ed8e5bd60716 152
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "961eb2b3727a951288f7409de217be09f8d9f2b6",
+  "prompts": {},
+  "sessions": {
+    "s_9efb74ace785ba": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "a2687907-dbce-4bf0-9fc8-e8de427478bd",
+        "model": "glink/GLM-5.3:glink_domestic"
+      },
+      "human_author": "Chenxi Qian <chenxi.qian.cq@outlook.com>"
+    }
+  }
+}
