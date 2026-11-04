@@ -1,0 +1,49 @@
+src/torchturbo/runtime/cpu.py
+  s_9bd31610582265::t_d58bbf6828887e 8
+  s_9bd31610582265::t_9dd079c5291326 75
+tests/engine/test_core.py
+  s_9bd31610582265::t_73de83b1769521 996,1002-1005
+  s_9bd31610582265::t_31d95e3bc225e0 1108,1116
+  s_9bd31610582265::t_b672083afe3830 42
+  s_9bd31610582265::t_078efe37b10bde 1043,1047-1050
+src/torchturbo/runtime/base.py
+  s_9bd31610582265::t_d6b3314dbdb36b 148
+  s_9bd31610582265::t_bd969834d3daf6 4,10-11,13-19,27
+  s_9bd31610582265::t_711e98640d0cf5 12
+src/torchturbo/runtime/npu.py
+  s_9bd31610582265::t_b64398376f647c 40,47-50
+  s_9bd31610582265::t_271b147bece8d8 8
+  s_9bd31610582265::t_18944a4eba2fcb 228,235
+  s_9bd31610582265::t_b327cbfcca721e 51
+src/torchturbo/runtime/cuda.py
+  s_9bd31610582265::t_ec179c747a0091 8,17,20,26,41,43
+  s_9bd31610582265::t_15e37a08a50a48 149,156
+src/torchturbo/runtime/__init__.py
+  s_9bd31610582265::t_5417cdf5d178b7 3
+  s_9bd31610582265::t_d80c673cb7f49b 21
+tests/runtime/test_runtime.py
+  s_9bd31610582265::t_321194fd4d5ac0 83
+  s_9bd31610582265::t_54b2ae118e5e3e 132
+  s_9bd31610582265::t_1c03514efa3ef2 341-345
+  s_9bd31610582265::t_2dfc0de5b06441 11
+  s_9bd31610582265::t_6a4be45095c3a7 371
+src/torchturbo/engine/core.py
+  s_9bd31610582265::t_9afc5bc63f4c08 36
+  s_9bd31610582265::t_2d2d81e778aeb2 825,830-835
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3acc3d14826173da71227f98c83d892175660d6e",
+  "prompts": {},
+  "sessions": {
+    "s_9bd31610582265": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "1b833444-07cd-4d8d-a20c-205da301759f",
+        "model": "glink/GLM-5.3:glink_domestic"
+      },
+      "human_author": "Chenxi Qian <chenxi.qian.cq@outlook.com>"
+    }
+  }
+}
