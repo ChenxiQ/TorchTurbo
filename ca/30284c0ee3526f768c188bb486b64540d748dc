@@ -1,0 +1,39 @@
+tests/ops/providers/npu/test_varlen_metadata.py
+  s_9efb74ace785ba::t_9e7a6ea7a0519d 43-71
+src/torchturbo/ops/providers/native/kda.py
+  s_9efb74ace785ba::t_267fb6eebeed39 33-45,48-52,60-70
+tests/ops/test_kda_dispatch.py
+  s_9efb74ace785ba::t_20c9c3c9a7ec0e 5-8,69-73,75,80-82,87,94
+  s_9efb74ace785ba::t_3c2faa5ddc170c 77-78
+tests/models/test_bailing_attention.py
+  s_9efb74ace785ba::t_bbb559ae7a9e7a 70
+  s_9efb74ace785ba::t_8e2dc03d3f097e 69,206-207
+  s_9efb74ace785ba::t_949aa4bcbbd54b 209
+  s_9efb74ace785ba::t_b21234d28130d1 201
+src/torchturbo/ops/providers/npu/kda.py
+  s_9efb74ace785ba::t_d494e7d87265b0 138-139
+  s_9efb74ace785ba::t_e80cee1015d941 141-142
+  s_9efb74ace785ba::t_ec95332116e4ce 140
+tests/ops/npu/test_kda.py
+  s_9efb74ace785ba::t_77431130b347a7 3-4
+  s_9efb74ace785ba::t_a4be26dfa5155f 42-44
+  s_9efb74ace785ba::t_116ec0b269de34 41
+src/torchturbo/models/bailing_hybrid/attention.py
+  s_9efb74ace785ba::t_d6ffd6daeaaeb0 221,225
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ca30284c0ee3526f768c188bb486b64540d748dc",
+  "prompts": {},
+  "sessions": {
+    "s_9efb74ace785ba": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "a2687907-dbce-4bf0-9fc8-e8de427478bd",
+        "model": "glink/GLM-5.3:glink_domestic"
+      },
+      "human_author": "Chenxi Qian <chenxi.qian.cq@outlook.com>"
+    }
+  }
+}
