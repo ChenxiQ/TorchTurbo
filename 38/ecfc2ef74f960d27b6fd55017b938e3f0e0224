@@ -1,0 +1,35 @@
+tests/ops/npu/test_kda.py
+  s_9efb74ace785ba::t_77431130b347a7 3-4
+  s_9efb74ace785ba::t_a4be26dfa5155f 41-45
+src/torchturbo/ops/providers/npu/kda.py
+  s_9efb74ace785ba::t_ec95332116e4ce 138-141
+  s_9efb74ace785ba::t_e80cee1015d941 142-143
+tests/models/test_bailing_attention.py
+  s_9efb74ace785ba::t_949aa4bcbbd54b 207-209,211
+  s_9efb74ace785ba::t_9f09d3bc30e446 69-70
+  s_9efb74ace785ba::t_bbb559ae7a9e7a 71
+tests/ops/test_kda_dispatch.py
+  s_9efb74ace785ba::t_20c9c3c9a7ec0e 5-8,69-73,75,77-79,81-83,88,95
+src/torchturbo/models/bailing_hybrid/attention.py
+  s_9efb74ace785ba::t_d6ffd6daeaaeb0 221,225
+src/torchturbo/ops/providers/native/kda.py
+  s_9efb74ace785ba::t_267fb6eebeed39 33-45,48-52,60-70
+tests/ops/providers/npu/test_varlen_metadata.py
+  s_9efb74ace785ba::t_9e7a6ea7a0519d 43-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "38ecfc2ef74f960d27b6fd55017b938e3f0e0224",
+  "prompts": {},
+  "sessions": {
+    "s_9efb74ace785ba": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "a2687907-dbce-4bf0-9fc8-e8de427478bd",
+        "model": "glink/GLM-5.3:glink_domestic"
+      },
+      "human_author": "Chenxi Qian <chenxi.qian.cq@outlook.com>"
+    }
+  }
+}
