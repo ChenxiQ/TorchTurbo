@@ -1,0 +1,89 @@
+src/torchturbo/runtime/npu.py
+  s_953280fe09b054::t_042de661fd3435 8,40,55,227,234
+  s_953280fe09b054::t_3b0c58c2c3c3d2 47-52
+  s_953280fe09b054::t_e7dca949c73bfb 71-83,89
+  s_953280fe09b054::t_7b07951602f055 69-70
+  s_953280fe09b054::t_1c86b67845282d 93-97
+  s_953280fe09b054::t_94bfec94a5cbb2 57-59,62-64
+scripts/runs/config_example.yaml
+  s_953280fe09b054::t_c4af5bf89738d5 121,123-128,133,136-140
+  s_953280fe09b054::t_c6d9dbbfbcb064 134-135
+  s_953280fe09b054::t_147856ed46eade 129-132
+  s_953280fe09b054::t_6e65299d67950c 122
+tests/adapters/llamafactory_v0/test_trainer.py
+  s_953280fe09b054::t_f84a0b7a859d9c 387-415
+  s_953280fe09b054::t_14a9899c13f340 439-440
+  s_953280fe09b054::t_994e4174457d18 386,416-438,441-443
+src/torchturbo/runtime/base.py
+  s_953280fe09b054::t_ed2243e71b9d15 67-68
+  s_953280fe09b054::t_042de661fd3435 4,76,197
+  s_953280fe09b054::t_786d644689779c 10-41,44-53,62-66
+  s_953280fe09b054::t_11395a2b6fc910 42-43,54-61
+src/torchturbo/runtime/__init__.py
+  s_9bd31610582265::t_5417cdf5d178b7 3
+  s_9bd31610582265::t_d80c673cb7f49b 21
+tests/engine/test_core.py
+  s_953280fe09b054::t_dfa8a307af77a3 1054-1078
+  s_953280fe09b054::t_f19c190047d6d9 1043
+  s_953280fe09b054::t_042de661fd3435 42,996,1039,1099,1102-1109
+  s_953280fe09b054::t_b5cfa97a831484 1002
+  s_953280fe09b054::t_dc6b18520507fb 1001,1021,1027-1038,1040-1042,1044-1053,1079
+  s_953280fe09b054::t_581fb7cb395fd3 1022-1024
+tests/runtime/test_runtime.py
+  s_953280fe09b054::t_592caf7249e2d3 275-312,314-318,386-395
+  s_953280fe09b054::t_042de661fd3435 3,11,83,132
+  s_953280fe09b054::t_3b1a6c68bb386e 313,319-385
+src/torchturbo/runtime/cpu.py
+  s_9bd31610582265::t_9dd079c5291326 75
+  s_9bd31610582265::t_d58bbf6828887e 8
+src/torchturbo/runtime/cuda.py
+  s_953280fe09b054::t_b02adc7de121d8 22-44,50,54-58
+  s_953280fe09b054::t_042de661fd3435 8,17,162,169
+src/torchturbo/engine/args.py
+  s_953280fe09b054::t_9aff880cd68186 653-656
+src/torchturbo/engine/config.py
+  s_953280fe09b054::t_325f2c32fca1ed 670-672
+  s_953280fe09b054::t_1d659b5b8255dd 1176
+  s_953280fe09b054::t_4ba448ae13acf8 838-840
+  s_953280fe09b054::t_c4153118f0f769 986-994
+  s_953280fe09b054::t_c3248efad8e888 908
+  s_953280fe09b054::t_ec54337afadf8b 1387-1401
+  s_953280fe09b054::t_22d070bfe323b1 709-714
+  s_953280fe09b054::t_f9e5c85bb373a5 1227
+  s_953280fe09b054::t_e17d98f37e026c 985
+  s_953280fe09b054::t_8e4345951a6542 529
+  s_953280fe09b054::t_8e88dea8f0a4d9 31
+  s_953280fe09b054::t_2db7f5329bc378 882
+src/torchturbo/engine/core.py
+  s_953280fe09b054::t_56d747f3e2a15c 851
+tests/engine/test_engine_config_loading.py
+  s_953280fe09b054::t_60ffba56106c1b 179-200,202-210,214-236
+  s_953280fe09b054::t_b93981896286df 201,211-213
+tests/engine/test_args.py
+  s_953280fe09b054::t_766de26b51cb62 241-245,250-251
+  s_953280fe09b054::t_0b9eaed3e81555 246-249
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c444cf2bac9c479648c9591d43bb2049cd66462d",
+  "prompts": {},
+  "sessions": {
+    "s_953280fe09b054": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "f9d68cf3-2141-4834-b8b7-760589f206e8",
+        "model": "glink/Kimi-K3.1-Pro:glink_domestic"
+      },
+      "human_author": null
+    },
+    "s_9bd31610582265": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "1b833444-07cd-4d8d-a20c-205da301759f",
+        "model": "glink/GLM-5.3:glink_domestic"
+      },
+      "human_author": "Chenxi Qian <chenxi.qian.cq@outlook.com>"
+    }
+  }
+}
