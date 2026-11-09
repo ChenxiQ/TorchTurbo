@@ -1,0 +1,121 @@
+scripts/runs/config_example.yaml
+  s_9efb74ace785ba::t_d2f10627cc819d 116-120
+src/torchturbo/engine/args.py
+  s_9efb74ace785ba::t_018122c2da73f8 178,520-529,834
+src/torchturbo/engine/backends/fsdp2/activation_checkpointing.py
+  s_9efb74ace785ba::t_36aa850acc44e2 1-69
+src/torchturbo/engine/backends/fsdp2/backend.py
+  s_9efb74ace785ba::t_8904155e422a6e 4-5,632-639,655,660-667,832,836-839,872-877,883-889,893-894,897-898,918-926,938
+src/torchturbo/engine/config.py
+  s_9efb74ace785ba::t_7af7bfa5301a15 25,476-481,721,843,846-847,849-850,868,871,966-967,972-974,1009-1010,1093,1290
+src/torchturbo/engine/peft/lora.py
+  s_9efb74ace785ba::t_8a123c8888c429 617,664,700,730-731
+src/torchturbo/models/bailing_hybrid/parallel_plan.py
+  s_9efb74ace785ba::t_e76a54111008ac 47
+src/torchturbo/models/deepseek_v4/mtp.py
+  s_9efb74ace785ba::t_019f469505acb4 659-664,666,676-690,793-794
+src/torchturbo/models/deepseek_v4/parallel_plan.py
+  s_9efb74ace785ba::t_0e1208ef0bcccb 46-47,68-70,73,87
+src/torchturbo/models/glm_moe_dsa/parallel_plan.py
+  s_9efb74ace785ba::t_392d8903e5d077 15-16,28-30,34,44
+src/torchturbo/models/kimi_k25/parallel_plan.py
+  s_9efb74ace785ba::t_ed3c0160b01dde 21-22,35-37,41,51
+src/torchturbo/models/llada2_moe/parallel_plan.py
+  s_9efb74ace785ba::t_c4261b953f9dd5 9-10,17-21,30,32-33,46
+src/torchturbo/models/modules/moe/experts.py
+  s_9efb74ace785ba::t_3e9c23e7da6fed 71,181-187,193-194,209-210,223-232,234-244,246-254,263
+src/torchturbo/models/modules/moe/moe_config.py
+  s_9efb74ace785ba::t_f890651b153abc 54,56,63-64,79-87
+src/torchturbo/models/modules/moe/moe_layer.py
+  s_9efb74ace785ba::t_77f995307d780d 10,34-35,46,77-78,87-89,104,106-107,149-176,178-180
+src/torchturbo/models/modules/moe/moe_utils.py
+  s_9efb74ace785ba::t_d016bf7fc51fd5 70
+src/torchturbo/models/modules/moe/router.py
+  s_9efb74ace785ba::t_5a4f4bc38ec821 26-61,102,283,319,323,337-343,364,376-378
+src/torchturbo/models/modules/moe/token_dispatcher.py
+  s_9efb74ace785ba::t_126c323945a474 1-7,9,11,13,16-17,20-21,24-25,27,30,33-37,39-44,46-51,54-58,60-65,67-72,76,79-80,88-92,94-96,104-108,111-118,121-127,130-134,136-137,139-142,144-147,154,157-185,187-188,190,192-193,195-198,200-201,204,206-211,214-223,226-228,230-231,241-242,245,248
+src/torchturbo/models/modules/moe/utils.py
+  s_9efb74ace785ba::t_85aa668b74ce9f 13,62,82,94,124-129,131,133,142-143,160,164,168,199-208,210-214,217,219,226,228,232,235,242-243
+src/torchturbo/models/qwen3_5_moe/parallel_plan.py
+  s_9efb74ace785ba::t_b8237b826b156a 37
+src/torchturbo/models/qwen3_moe/parallel_plan.py
+  s_9efb74ace785ba::t_2084317bf37c89 14-15,24-27,35
+src/torchturbo/models/qwen4_exp/parallel_plan.py
+  s_9efb74ace785ba::t_d783dcc316d5e2 36,39
+src/torchturbo/ops/moe.py
+  s_9efb74ace785ba::t_616d6cdf075efb 1-66
+src/torchturbo/ops/providers/cuda/moe_permutation.py
+  s_9efb74ace785ba::t_e77312772837ca 1-2,5,8,13,17-37,39-40,43,45,47-48,50-53,55-113,115-117,123-188,190-196
+src/torchturbo/ops/providers/native/moe_permutation.py
+  s_9efb74ace785ba::t_151b433fa1794b 1-126
+src/torchturbo/ops/providers/npu/moe_permutation.py
+  s_9efb74ace785ba::t_2f66fed7802701 1-2,10,14-54,56-57,62,65,73-163,165-195
+src/torchturbo/parallel/fsdp.py
+  s_9efb74ace785ba::t_9a9695abe7ff66 5-7,147-181
+tests/adapters/msswift/test_dpo_moe_loss.py
+  s_9efb74ace785ba::t_e3b3dcd92360e3 127
+tests/engine/backends/fsdp2/test_activation_checkpointing.py
+  s_9efb74ace785ba::t_d10713d48a5dac 1-285
+tests/engine/test_args.py
+  s_9efb74ace785ba::t_fd36ca7aee49a4 118-130
+tests/engine/test_config.py
+  s_9efb74ace785ba::t_f345b50ebce614 85-170
+tests/engine/test_core.py
+  s_9efb74ace785ba::t_8120649abe6c42 405
+tests/engine/test_engine_config_loading.py
+  s_9efb74ace785ba::t_be84ecde4b6c8a 949-956
+tests/engine/test_grouped_mlp_lora.py
+  s_9efb74ace785ba::t_685db4b5454da0 1-4,12-76
+tests/models/bailing_hybrid/test_moe.py
+  s_9efb74ace785ba::t_298987a556e159 1-228
+tests/models/deepseek_v4/test_moe_ops.py
+  s_9efb74ace785ba::t_e1db7e40f435d6 63,83,86
+tests/models/deepseek_v4/test_mtp.py
+  s_9efb74ace785ba::t_d82c569011d53c 3,15,18-25,375-442
+tests/models/deepseek_v4/test_mtp_router_padding.py
+  s_9efb74ace785ba::t_d99b3b22e29ea2 1-220
+tests/models/llada2_moe/test_model.py
+  s_9efb74ace785ba::t_3dc2401d2ef451 147,150
+tests/models/qwen3_5_moe/test_moe.py
+  s_9efb74ace785ba::t_d031acc0594056 1-135
+tests/models/test_moe_adapter_config.py
+  s_9efb74ace785ba::t_27f0f188ea702f 1-166
+tests/models/test_moe_adapter_routing.py
+  s_9efb74ace785ba::t_27a1b05c9678d2 1-241
+tests/models/test_moe_alltoall_distributed.py
+  s_9efb74ace785ba::t_f146282dc3b2aa 1-196
+tests/models/test_moe_experts.py
+  s_9efb74ace785ba::t_b22e69c66b442a 1-3,7-9,11-16,19-68,70-102,104-109,112-120
+tests/models/test_moe_permutation.py
+  s_9efb74ace785ba::t_716f9b67618e56 1-387
+tests/models/test_moe_probability_weighting.py
+  s_9efb74ace785ba::t_443087bffa3161 1-374
+tests/models/test_moe_router.py
+  s_9efb74ace785ba::t_01f416bc6f3912 3,5,8,10-230
+tests/models/test_token_dispatcher.py
+  s_9efb74ace785ba::t_12da326f05732d 1-199
+tests/ops/npu/test_moe_permutation.py
+  s_9efb74ace785ba::t_e5e87e260d91a5 1-292
+tests/ops/test_dispatch.py
+  s_9efb74ace785ba::t_4f194fde29751b 116
+tests/ops/test_moe_permutation_contract.py
+  s_9efb74ace785ba::t_90275354bf7f63 1-445
+tests/parallel/test_fsdp_plan.py
+  s_9efb74ace785ba::t_e9208fb376c641 87-104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cbe0807017cc0c64c34708d7a8a8c4176d5b46a1",
+  "prompts": {},
+  "sessions": {
+    "s_9efb74ace785ba": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "a2687907-dbce-4bf0-9fc8-e8de427478bd",
+        "model": "glink/GLM-5.3:glink_domestic"
+      },
+      "human_author": "Chenxi Qian <chenxi.qian.cq@outlook.com>"
+    }
+  }
+}
