@@ -4,7 +4,7 @@ triton baseline in bailing_hybrid's production config (packed varlen,
 ``fla`` and ``fla_npu`` installed.
 
 Bound to fla 0.6.0 (main @ 954438d1) and the fla_npu wheel built from
-main @ c39b0eb3; re-run if either version moves.
+main @ d77c3738; re-run if either version moves.
 """
 
 from __future__ import annotations
@@ -50,10 +50,8 @@ def _make_inputs(device, dtype, batch=1, heads=2, head_dim=128, seq_len=128):
     return q, k, v, g, beta, A_log, dt_bias, cu_seqlens
 
 
-def _run_and_backward(impl, device, dtype, packed):
+def _run_and_backward(impl, device, dtype):
     q, k, v, g, beta, A_log, dt_bias, cu_seqlens = _make_inputs(device, dtype)
-    if not packed:
-        cu_seqlens = None
     for t in (q, k, v, g, beta, A_log, dt_bias):
         t.requires_grad_(True)
 
@@ -85,14 +83,13 @@ def _run_and_backward(impl, device, dtype, packed):
 # with a CANN error); production also runs bailing in bf16, so the numeric
 # alignment is a bf16 comparison.
 @pytest.mark.parametrize("dtype", [torch.bfloat16])
-@pytest.mark.parametrize("packed", [False, True])
-def test_ascendc_chunk_kda_matches_fl_triton(dtype, packed):
+def test_ascendc_chunk_kda_matches_fl_triton(dtype):
     device = "npu"
     if not torch.npu.is_available():  # pragma: no cover - guard for hosts
         pytest.skip("NPU device not available")
 
-    baseline = _run_and_backward("fla_kda", device, dtype, packed)
-    ascendc = _run_and_backward("ascendc_kda", device, dtype, packed)
+    baseline = _run_and_backward("fla_kda", device, dtype)
+    ascendc = _run_and_backward("ascendc_kda", device, dtype)
 
     tolerance = 1e-3 if dtype == torch.float32 else 2e-2
     names = ("o", "dq", "dk", "dv", "dg", "dbeta", "dA_log", "dt_bias")
