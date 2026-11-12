@@ -26,13 +26,7 @@ def _chunk_indices(cu_seqlens):
 def _prepare_kda_metadata(cu_seqlens, _version):
     """Cache host boundaries and 64-token chunk indices across layers."""
     cu_host = cu_seqlens.detach().cpu().tolist()
-    nonempty = [i for i, (left, right) in enumerate(pairwise(cu_host)) if right > left]
-    if len(nonempty) == len(cu_host) - 1:
-        nonempty = None
-    else:
-        # The forward normalization path requires strictly increasing boundaries.
-        cu_host = [cu_host[0]] + [cu_host[i + 1] for i in nonempty]
-    return cu_host, _chunk_indices(cu_host), nonempty
+    return cu_host, _chunk_indices(cu_host)
 
 
 class ChunkKDAFunction(torch.autograd.Function):
@@ -59,9 +53,9 @@ class ChunkKDAFunction(torch.autograd.Function):
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         from fla_npu.ops.ascendc import chunk_kda_fwd
 
-        cu_host = indices = nonempty = None
+        cu_host = indices = None
         if cu_seqlens is not None:
-            cu_host, indices, nonempty = _prepare_kda_metadata(cu_seqlens, cu_seqlens._version)
+            cu_host, indices = _prepare_kda_metadata(cu_seqlens, cu_seqlens._version)
         packed = cu_host is not None
         ctx.g_dtype, ctx.beta_dtype = g.dtype, beta.dtype
         if packed:
@@ -107,12 +101,6 @@ class ChunkKDAFunction(torch.autograd.Function):
             beta_eff_out=beta_eff,
         )
         output, final_state, _gk, aqk, akk, _w, _u, _qg, _kg, _v_new, _h, _state = outputs
-        if final_state is not None and nonempty is not None:
-            expanded_state = final_state.new_zeros(
-                (cu_seqlens.numel() - 1, *final_state.shape[1:])
-            )
-            expanded_state[nonempty] = final_state
-            final_state = expanded_state
         if q_hat is not None:
             q, k = q_hat, k_hat
         if save_backward:
@@ -155,7 +143,7 @@ class ChunkKDAFunction(torch.autograd.Function):
         if packed:
             grad_output = grad_output.squeeze(0)
         # Model tensors and output gradients stay token-major. The upstream
-        # backward rebuilds the omitted forward caches and handles empty sequences.
+        # backward rebuilds the omitted forward caches.
         dq, dk, dv, dbeta, dg, _dh0, dA, dbias = npu_chunk_kda_bwd(
             q, k, v, beta, None, aqk, akk, None, None, None, None, None,
             grad_output.contiguous(), ctx.scale,
