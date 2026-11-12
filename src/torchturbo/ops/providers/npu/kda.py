@@ -89,7 +89,7 @@ class ChunkKDAFunction(torch.autograd.Function):
             use_gate_in_kernel=use_gate_in_kernel,
             A_log=A_log,
             dt_bias=dt_bias,
-            disable_recompute=export_intermediates,
+            disable_recompute=False,
             use_exp2=True,
             use_qk_l2norm_in_kernel=use_qk_l2norm_in_kernel,
             use_beta_sigmoid_in_kernel=use_beta_sigmoid_in_kernel,
@@ -130,9 +130,11 @@ class ChunkKDAFunction(torch.autograd.Function):
         grad_final_state: torch.Tensor | None,
     ) -> tuple[torch.Tensor | None, ...]:
         from fla_npu.ops.ascendc import (
+            npu_chunk_fwd_h,
             npu_chunk_gated_delta_rule_bwd_dhu,
             npu_chunk_kda_bwd_finalize,
             npu_chunk_kda_bwd_prepare,
+            npu_chunk_kda_bwd_recompute,
         )
 
         # A zero grad is the discarded output's placeholder; a non-zero
@@ -157,6 +159,24 @@ class ChunkKDAFunction(torch.autograd.Function):
             cu = [cu[0]] + [right for left, right in pairwise(cu) if right > left]
             indices = _chunk_indices(cu)
         layout = "NTD" if packed else "BNSD"
+        # Recompute consumes rank-4 head-major tensors, including packed inputs.
+        recompute_inputs = (q, k, v, g, beta, akk)
+        if packed:
+            recompute_inputs = tuple(t.unsqueeze(0) for t in recompute_inputs)
+        gk, w, u, qg, kg = npu_chunk_kda_bwd_recompute(
+            *recompute_inputs, 64, A_log=A_log, dt_bias=dt_bias,
+            cu_seqlens=cu, chunk_indices=indices,
+            use_gate_in_kernel=ctx.use_gate_in_kernel, use_exp2=True,
+            lower_bound=ctx.lower_bound,
+        )
+        h, v_new, _ = npu_chunk_fwd_h(
+            kg, w, u, gk=gk, chunk_size=64, save_new_value=True,
+            cu_seqlens=cu, chunk_indices=indices, use_exp2=True,
+        )
+        if packed:
+            gk, w, qg, kg, v_new, h = (
+                t.squeeze(0) for t in (gk, w, qg, kg, v_new, h)
+            )
         d_aqk, dv_local, dq_raw = npu_chunk_kda_bwd_prepare(
             aqk, v_new, grad_output, h, scale=ctx.scale, layout=layout,
             chunk_size=64, cu_seqlens=cu, chunk_indices=indices,
@@ -304,9 +324,11 @@ class AscendCKDA(OpImpl):
         try:
             from fla_npu.ops.ascendc import (  # noqa: F401
                 chunk_kda_fwd,
+                npu_chunk_fwd_h,
                 npu_chunk_gated_delta_rule_bwd_dhu,
                 npu_chunk_kda_bwd_finalize,
                 npu_chunk_kda_bwd_prepare,
+                npu_chunk_kda_bwd_recompute,
             )
         except ImportError:
             return False
