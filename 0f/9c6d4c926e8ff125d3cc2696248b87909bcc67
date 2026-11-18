@@ -1,0 +1,14 @@
+src/torchturbo/ops/providers/npu/kda.py
+  h_2fb2819039a069 33,52,65-72,74-75,84,93,103,106,108-109,130,139-140,145-151,153-156,158,161,277
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0f9c6d4c926e8ff125d3cc2696248b87909bcc67",
+  "prompts": {},
+  "humans": {
+    "h_2fb2819039a069": {
+      "author": "Chenxi Qian <qcx02367502@antgroup.com>"
+    }
+  }
+}
