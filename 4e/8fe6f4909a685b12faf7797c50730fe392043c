@@ -1,0 +1,19 @@
+docker/npu/Dockerfile_aarch64
+  s_1d3139c5945dab::t_4faae4d7d66a64 34-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4e8fe6f4909a685b12faf7797c50730fe392043c",
+  "prompts": {},
+  "sessions": {
+    "s_1d3139c5945dab": {
+      "agent_id": {
+        "tool": "codefuse",
+        "id": "ea8d7361-7ea0-4c19-90f2-cb54176251e3",
+        "model": "codefuse_official_channel/DeepSeek-V4.1-Flash-1017"
+      },
+      "human_author": "Chenxi Qian <chenxi.qian.cq@outlook.com>"
+    }
+  }
+}
