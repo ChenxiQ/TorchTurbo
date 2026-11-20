@@ -74,6 +74,10 @@ class TurboBailingMoeV3VLForConditionalGeneration(
     ) -> Iterator[None]:
         if not engine_config.mtp.enabled:
             config.text_config.num_nextn_predict_layers = 0
+        from ..bailing_hybrid.attention import set_kda_cp_backend, set_kda_sp_mode
+
+        set_kda_sp_mode(engine_config.kda_sp_mode)
+        set_kda_cp_backend(engine_config.kda_cp_backend)
         with super().init_context(config, engine_config):
             yield
 

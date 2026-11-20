@@ -20,6 +20,47 @@ def patch_rms_norm(norm_cls: type[nn.Module]) -> None:
     norm_cls.forward = rms_norm_forward
 
 
+_KDA_SP_MODE = "ulysses"
+_KDA_CP_BACKEND = "auto"
+
+
+def set_kda_sp_mode(mode: str) -> None:
+    """Select the KDA sequence-parallel strategy: 'ulysses' (default) or 'cp'."""
+    global _KDA_SP_MODE
+    if mode not in ("ulysses", "cp"):
+        raise ValueError(f"Unknown kda_sp_mode {mode!r}; expected 'ulysses' or 'cp'.")
+    _KDA_SP_MODE = mode
+
+
+def set_kda_cp_backend(backend: str) -> None:
+    """Select the CP operator backend: 'auto', 'ascendc' (fla_npu) or 'fla'."""
+    global _KDA_CP_BACKEND
+    if backend not in ("auto", "ascendc", "fla"):
+        raise ValueError(
+            f"Unknown kda_cp_backend {backend!r}; expected 'auto', 'ascendc' or 'fla'."
+        )
+    _KDA_CP_BACKEND = backend
+
+
+def _select_cp_backend() -> str:
+    """Resolve 'auto': native fla_npu AscendC operators when importable, else fla."""
+    if _KDA_CP_BACKEND != "auto":
+        return _KDA_CP_BACKEND
+    try:
+        from fla_npu.ops.ascendc import (  # noqa: F401
+            chunk_kda_fwd,
+            npu_chunk_gated_delta_rule_bwd_dhu,
+            npu_chunk_kda_bwd_finalize,
+            npu_chunk_kda_bwd_prepare,
+        )
+        from torchturbo.ops.providers.npu._fla_gdn import (  # noqa: F401
+            ascendc_causal_conv1d,
+        )
+    except Exception:
+        return "fla"
+    return "ascendc"
+
+
 def patch_kda_forward(
     attention_cls: type[nn.Module],
     sp_group: ProcessGroup | None,
@@ -82,6 +123,171 @@ def patch_kda_forward(
             prenorm=prenorm,
             residual_in_fp32=residual_in_fp32,
         )
+
+    def cp_forward(
+        self: nn.Module,
+        hidden_states: torch.Tensor,
+        attention_mask: torch.Tensor | None = None,
+        past_key_value: Any = None,
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, None, None]:
+        """KDA forward with operator-level context parallelism (fla cp_context).
+
+        The sequence stays sharded across SP ranks; only tiny recurrent states
+        are exchanged instead of the Ulysses all-to-all activation gather/scatter.
+        """
+        from fla.modules.causal_conv1d import causal_conv1d as fla_causal_conv1d
+        from fla.ops.cp import build_cp_context
+        from fla.ops.kda import chunk_kda as fla_chunk_kda
+
+        assert past_key_value is None, "KDA training does not accept a KV cache."
+        assert self.mode == "chunk", "Only chunk mode is supported in training."
+
+        batch_size, q_len, _ = hidden_states.shape
+        cu_seqlens = kwargs.get("cu_seqlens")
+        packed_params = get_packed_params(cu_seqlens, q_len * sp_size)
+        if packed_params is not None:
+            cu_seqlens = packed_params.cu_seqlens
+        if cu_seqlens is None:
+            cu_seqlens = torch.tensor(
+                [0, q_len * sp_size], dtype=torch.long, device=hidden_states.device
+            )
+        cp_ctx = build_cp_context(
+            cu_seqlens, group=sp_group, conv1d_kernel_size=self.conv_size
+        )
+
+        def conv(x: torch.Tensor, conv_mod: nn.Module) -> torch.Tensor:
+            return fla_causal_conv1d(
+                x=x,
+                weight=conv_mod.weight.squeeze(1),
+                bias=conv_mod.bias,
+                activation=conv_mod.activation,
+                cp_context=cp_ctx,
+            )[0]
+
+        q = conv(self.q_proj(hidden_states), self.q_conv1d)
+        k = conv(self.k_proj(hidden_states), self.k_conv1d)
+        v = conv(self.v_proj(hidden_states), self.v_conv1d)
+        if self.no_kda_lora:
+            g = self.f_proj(hidden_states)
+        else:
+            g = self.f_b_proj(self.f_a_proj(hidden_states))
+        beta = self.b_proj(hidden_states).float().sigmoid()
+
+        q = q.unflatten(-1, (-1, self.head_k_dim))
+        k = k.unflatten(-1, (-1, self.head_k_dim))
+        v = v.unflatten(-1, (-1, self.head_dim))
+        g = g.unflatten(-1, (-1, self.head_dim))
+
+        o, _ = fla_chunk_kda(
+            q=q,
+            k=k,
+            v=v,
+            g=g,
+            beta=beta,
+            A_log=self.A_log,
+            dt_bias=self.dt_bias,
+            use_qk_l2norm_in_kernel=True,
+            use_gate_in_kernel=True,
+            safe_gate=self.safe_gate,
+            lower_bound=self.lower_bound,
+            cp_context=cp_ctx,
+        )
+
+        # Output gating uses the original local sequence and all of its heads.
+        if self.no_kda_lora:
+            g_out = self.g_proj(hidden_states)
+        else:
+            g_out = self.g_b_proj(self.g_a_proj(hidden_states))
+        g_out = g_out.unflatten(-1, (-1, self.head_dim))
+        self.o_norm.forward = norm_forward.__get__(self.o_norm)
+        o = self.o_norm(o, g_out)
+        o = self.o_proj(o.flatten(-2))
+        return o, None, None
+
+    def cp_forward_native(
+        self: nn.Module,
+        hidden_states: torch.Tensor,
+        attention_mask: torch.Tensor | None = None,
+        past_key_value: Any = None,
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, None, None]:
+        """KDA forward with operator-level context parallelism (fla_npu AscendC).
+
+        Same CP contract as ``cp_forward`` but runs entirely on native NPU
+        operators: the sequence stays sharded, and only the recurrent
+        boundary states ([N,H,K,V]) plus the conv1d boundary windows cross
+        ranks, replacing the Ulysses all-to-all activation exchanges.
+        """
+        from torchturbo.models.bailing_hybrid.kda_cp_npu import (
+            CausalConv1dCPFunction,
+            _shard_state_flags,
+            kda_cp_core,
+        )
+
+        assert past_key_value is None, "KDA training does not accept a KV cache."
+        assert self.mode == "chunk", "Only chunk mode is supported in training."
+
+        batch_size, q_len, _ = hidden_states.shape
+        cu_seqlens = kwargs.get("cu_seqlens")
+        packed_params = get_packed_params(cu_seqlens, q_len * sp_size)
+        if packed_params is not None:
+            cu_seqlens = packed_params.cu_seqlens
+        cu_host = cu_seqlens.detach().cpu().tolist() if cu_seqlens is not None else None
+        need_in, need_out = _shard_state_flags(cu_host, sp_rank, sp_size, q_len)
+
+        def conv(x: torch.Tensor, conv_mod: nn.Module) -> torch.Tensor:
+            return CausalConv1dCPFunction.apply(
+                x,
+                conv_mod.weight.squeeze(1),
+                conv_mod.bias,
+                conv_mod.activation,
+                need_in,
+                need_out,
+                sp_group,
+                sp_rank,
+            )
+
+        q = conv(self.q_proj(hidden_states), self.q_conv1d)
+        k = conv(self.k_proj(hidden_states), self.k_conv1d)
+        v = conv(self.v_proj(hidden_states), self.v_conv1d)
+        if self.no_kda_lora:
+            g = self.f_proj(hidden_states)
+        else:
+            g = self.f_b_proj(self.f_a_proj(hidden_states))
+        beta = self.b_proj(hidden_states).float()
+
+        q = q.unflatten(-1, (-1, self.head_k_dim))
+        k = k.unflatten(-1, (-1, self.head_k_dim))
+        v = v.unflatten(-1, (-1, self.head_dim))
+        g = g.unflatten(-1, (-1, self.head_dim))
+
+        o = kda_cp_core(
+            q,
+            k,
+            v,
+            g,
+            beta,
+            A_log=self.A_log,
+            dt_bias=self.dt_bias,
+            scale=None,
+            lower_bound=self.lower_bound,
+            cu_seqlens=cu_seqlens,
+            sp_group=sp_group,
+            sp_rank=sp_rank,
+            sp_size=sp_size,
+        )
+
+        # Output gating uses the original local sequence and all of its heads.
+        if self.no_kda_lora:
+            g_out = self.g_proj(hidden_states)
+        else:
+            g_out = self.g_b_proj(self.g_a_proj(hidden_states))
+        g_out = g_out.unflatten(-1, (-1, self.head_dim))
+        self.o_norm.forward = norm_forward.__get__(self.o_norm)
+        o = self.o_norm(o, g_out)
+        o = self.o_proj(o.flatten(-2))
+        return o, None, None
 
     def sp_forward(
         self: nn.Module,
@@ -248,4 +454,9 @@ def patch_kda_forward(
         o = self.o_proj(o.flatten(-2))
         return o, None, None
 
-    attention_cls.forward = sp_forward
+    if _KDA_SP_MODE == "cp":
+        attention_cls.forward = (
+            cp_forward_native if _select_cp_backend() == "ascendc" else cp_forward
+        )
+    else:
+        attention_cls.forward = sp_forward

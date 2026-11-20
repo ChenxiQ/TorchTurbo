@@ -676,6 +676,8 @@ class EngineConfig:
     """MFU/HFU reporting settings."""
 
     gbs: int | None = None
+    kda_sp_mode: str = "ulysses"
+    kda_cp_backend: str = "auto"
     """Global batch size in micro-batch units (``--tt_gbs``). When set, the
     engine derives ``gradient_accumulation_steps = gbs * sp_size / world_size``
     """
@@ -901,6 +903,8 @@ class EngineConfig:
             diffusion=_build_diffusion_config(d),
             mfu=mfu_config,
             gbs=d.get("gbs"),
+            kda_sp_mode=d.get("kda_sp_mode", "ulysses"),
+            kda_cp_backend=d.get("kda_cp_backend", "auto"),
             plugin_paths=list(d.get("plugin_paths") or []),
             extra=extra,
         )
@@ -1204,6 +1208,8 @@ def _validate_config_file(data: Mapping[str, Any], parents: tuple[str, ...] = ()
             "backend_config.cpu_offload.mode",
             "backend_config.cpu_offload.optimizer_memory_fraction",
             "freeze_policy.patterns",
+            "kda_sp_mode",
+            "kda_cp_backend",
         }
     )
     allowed.update(_dataclass_config_paths(OptimizerConfig, ("optimizer",)))
