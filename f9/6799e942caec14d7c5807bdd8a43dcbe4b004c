@@ -1,0 +1,28 @@
+docker/npu/Dockerfile_aarch64
+  s_1d3139c5945dab::t_6426ea337f37ab 34
+  s_1d3139c5945dab::t_9176f348066e63 32-33
+  s_1d3139c5945dab::t_e755e7177ec369 35-36
+src/torchturbo/ops/providers/npu/kda.py
+  h_2fb2819039a069 33,52,65-72,74-75,84,93,103,106,108-109,130,139-140,145-151,153-156,158,161,275
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f96799e942caec14d7c5807bdd8a43dcbe4b004c",
+  "prompts": {},
+  "humans": {
+    "h_2fb2819039a069": {
+      "author": "Chenxi Qian <qcx02367502@antgroup.com>"
+    }
+  },
+  "sessions": {
+    "s_1d3139c5945dab": {
+      "agent_id": {
+        "tool": "codefuse",
+        "id": "ea8d7361-7ea0-4c19-90f2-cb54176251e3",
+        "model": "codefuse_official_channel/DeepSeek-V4.1-Flash-1017"
+      },
+      "human_author": null
+    }
+  }
+}
