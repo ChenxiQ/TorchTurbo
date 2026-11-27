@@ -29,6 +29,186 @@ def _prepare_kda_metadata(cu_seqlens, _version):
     return cu_host, _chunk_indices(cu_host)
 
 
+def _cp_forward(
+    ctx: Any,
+    cp_context: Any,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    g: torch.Tensor,
+    beta: torch.Tensor,
+    A_log: torch.Tensor | None,
+    dt_bias: torch.Tensor | None,
+    scale: float,
+    lower_bound: float | None,
+    cu_seqlens: torch.Tensor | None,
+    save_backward: bool,
+) -> tuple[torch.Tensor, torch.Tensor | None]:
+    """Head-major three-stage forward for context parallelism.
+
+    Deliberately separate from the fused single-rank path: the CP kernels
+    exchange recurrent states across ranks, and the fused backward rejects
+    ``dht``, so the whole CP leg runs on the three-stage operators.
+    """
+    from .kda_cp import cp_forward
+
+    # CP always runs packed, and the boundaries must be this rank's shard --
+    # not whatever global cu_seqlens the caller happens to pass. Using the
+    # global list here would make the three-stage backward size its kernels
+    # for the full sequence against local-shaped caches.
+    cu_host = list(cp_context.cu_seqlens)
+    ctx.g_dtype, ctx.beta_dtype = g.dtype, beta.dtype
+
+    # The dispatcher squeezes the batch dim off q/k/v only, so g/beta still
+    # carry it and must drop it here before going head-major.
+    q_h = q.transpose(0, 1).contiguous()
+    k_h = k.transpose(0, 1).contiguous()
+    v_h = v.transpose(0, 1).contiguous()
+    g_h = g.squeeze(0).transpose(0, 1).contiguous()
+    beta_h = beta.squeeze(0).transpose(0, 1).contiguous()
+
+    outputs, q_hat, k_hat, q_rstd, k_rstd, beta_eff = cp_forward(
+        cp_context, q_h, k_h, v_h, g_h, beta_h, scale,
+        safe_gate=True, lower_bound=lower_bound,
+        A_log=A_log, dt_bias=dt_bias,
+    )
+    output, _final_state, gk, aqk, akk, w, u, qg, kg, v_new, h, _h0 = outputs
+
+    ctx.cp_context = cp_context
+    ctx.scale = scale
+    ctx.lower_bound = lower_bound
+    ctx.use_gate_in_kernel = True
+    ctx.use_beta_sigmoid_in_kernel = True
+    ctx.cu_seqlens = cu_host
+    ctx.set_materialize_grads(False)
+    if save_backward:
+        # The three-stage backward needs the full head-major cache set.
+        ctx.save_for_backward(
+            q_hat, k_hat, v_h, g_h, beta_h, A_log, dt_bias,
+            gk, aqk, akk, w, u, qg, kg, v_new, h,
+            q_rstd, k_rstd, beta_eff,
+        )
+
+    if output.dim() == 3:
+        output = output.unsqueeze(0)
+    return output, None
+
+
+def _cp_backward(
+    ctx: Any,
+    grad_output: torch.Tensor,
+) -> tuple[torch.Tensor | None, ...]:
+    """Three-stage backward with cross-rank dht exchange.
+
+    Mirrors the reference CP leg: prepare -> boundary dht -> dhu -> finalize,
+    then restores the model's token-major spelling for the q/k/v gradients.
+    """
+    from fla_npu.ops.ascendc import (
+        npu_chunk_gated_delta_rule_bwd_dhu,
+        npu_chunk_kda_bwd_finalize,
+        npu_chunk_kda_bwd_prepare,
+    )
+
+    from .kda_cp import cp_backward_boundary
+
+    (
+        q, k, v, g, beta, A_log, dt_bias,
+        gk, aqk, akk, w, u, qg, kg, v_new, h,
+        q_rstd, k_rstd, beta_eff,
+    ) = ctx.saved_tensors
+    packed = ctx.cu_seqlens is not None
+    layout = "NTD" if packed else "BNSD"
+
+    # cp_forward runs the BNSD spelling, so every cache comes back with a
+    # leading batch dim; the NTD three-stage path wants rank-3 head-major.
+    # v/g/beta were already squeezed on the way in.
+    if packed:
+        q, k, gk, aqk, akk, w, u, qg, kg, v_new, h = (
+            tensor.squeeze(0).contiguous()
+            for tensor in (q, k, gk, aqk, akk, w, u, qg, kg, v_new, h)
+        )
+        q_rstd, k_rstd, beta_eff = (
+            tensor.squeeze(0).contiguous()
+            for tensor in (q_rstd, k_rstd, beta_eff)
+        )
+
+    # grad_output arrives token-major; the CP kernels want head-major.
+    do_h = grad_output.transpose(1, 2).contiguous()
+    if packed:
+        do_h = do_h.squeeze(0)
+
+    # fwd_prepare derives this itself; dhu and finalize demand it alongside
+    # cu_seqlens.
+    from fla_npu.ops.ascendc._stable import _canonical_chunk_indices
+    chunk_indices = _canonical_chunk_indices(ctx.cu_seqlens, 64)
+
+    d_aqk, dv_local, dq_raw = npu_chunk_kda_bwd_prepare(
+        aqk, v_new, do_h, h, scale=ctx.scale, layout=layout,
+        chunk_size=64, cu_seqlens=ctx.cu_seqlens,
+    )
+
+    # Dhu takes rank-4 token tensors; adding B=1 is a view.
+    scan = (qg, kg, w, do_h, dv_local, gk)
+    if packed:
+        scan = tuple(tensor.unsqueeze(0) for tensor in scan)
+    qg_scan, kg_scan, w_scan, do_scan, dv_scan_in, gk_scan = scan
+
+    dht = cp_backward_boundary(
+        ctx.cp_context, qg_scan, kg_scan, w_scan, do_scan, dv_scan_in,
+        gk_scan, ctx.scale,
+    )
+    dh, _dh0, dv_scan = npu_chunk_gated_delta_rule_bwd_dhu(
+        qg_scan, kg_scan, w_scan, do_scan, dv_scan_in, ctx.scale, 64,
+        gK=gk_scan, cu_seqlens=ctx.cu_seqlens, chunk_indices=chunk_indices,
+        use_exp2=True, dht=dht,
+    )
+    if packed:
+        dh, dv_scan = dh.squeeze(0), dv_scan.squeeze(0)
+
+    # Finalize's fused-sigmoid dtype row is raw_g=BF16/FP32, beta=FP32,
+    # d_beta=BF16 (chunk_kda_bwd_finalize_def.cpp). Keep raw_g in the model's
+    # own dtype so no FP32 copy is allocated, but beta must be FP32.
+    bias = dt_bias
+    if bias is None:
+        bias = torch.zeros(
+            (q.shape[0], q.shape[-1]), dtype=torch.float32, device=q.device,
+        )
+    dq_h, dk_h, dv_h, dbeta, dg, dA, dbias = npu_chunk_kda_bwd_finalize(
+        q, k, v, gk, g, beta.float(), A_log, bias, akk, v_new, h, dh,
+        dv_scan, d_aqk, dq_raw,
+        scale=ctx.scale, lower_bound=ctx.lower_bound, chunk_size=64,
+        safe_gate=True, use_gate_in_kernel=ctx.use_gate_in_kernel,
+        q_rstd=q_rstd, k_rstd=k_rstd,
+        cu_seqlens=ctx.cu_seqlens, chunk_indices=chunk_indices,
+        output_layout=layout,
+        use_beta_sigmoid_in_kernel=ctx.use_beta_sigmoid_in_kernel,
+        use_exp2=True,
+    )
+
+    def to_token_major(tensor: torch.Tensor) -> torch.Tensor:
+        if packed:
+            return tensor.unsqueeze(0).transpose(1, 2).contiguous()
+        return tensor.transpose(1, 2).contiguous()
+
+    dq = to_token_major(dq_h).to(q.dtype)
+    dk = to_token_major(dk_h).to(k.dtype)
+    dv = to_token_major(dv_h).to(v.dtype)
+    dg = to_token_major(dg).to(ctx.g_dtype)
+    dbeta = to_token_major(dbeta).to(ctx.beta_dtype)
+
+    dA = None if A_log is None else dA.to(A_log)
+    if dbias is not None and dt_bias is not None:
+        if dbias.dim() == 2:
+            dbias = dbias.reshape(-1)
+        dbias = dbias.to(dt_bias)
+    dbias = None if dt_bias is None else dbias
+
+    return (
+        dq, dk, dv, dg, dbeta, dA, dbias,
+        None, None, None, None, None, None, None, None, None,
+    )
+
+
 class ChunkKDAFunction(torch.autograd.Function):
     """Connect token-major model tensors to the AscendC KDA operators."""
 
@@ -50,7 +230,14 @@ class ChunkKDAFunction(torch.autograd.Function):
         use_qk_l2norm_in_kernel: bool,
         use_beta_sigmoid_in_kernel: bool,
         save_backward: bool,
+        cp_context: Any | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        if cp_context is not None:
+            return _cp_forward(
+                ctx, cp_context, q, k, v, g, beta, A_log, dt_bias,
+                scale, lower_bound, cu_seqlens, save_backward,
+            )
+
         from fla_npu.ops.ascendc import chunk_kda_fwd
 
         cu_host = indices = None
@@ -127,14 +314,16 @@ class ChunkKDAFunction(torch.autograd.Function):
         grad_output: torch.Tensor,
         grad_final_state: torch.Tensor | None,
     ) -> tuple[torch.Tensor | None, ...]:
-        from fla_npu.ops.ascendc import npu_chunk_kda_bwd
-
         # A zero grad is the discarded output's placeholder; a non-zero
         # one means the loss depends on final_state, which has no backward.
         if grad_final_state is not None and bool(grad_final_state.any()):
             raise NotImplementedError(
                 "AscendC KDA does not support gradients through final_state."
             )
+        if getattr(ctx, "cp_context", None) is not None:
+            return _cp_backward(ctx, grad_output)
+
+        from fla_npu.ops.ascendc import npu_chunk_kda_bwd
         (
             q, k, v, g, beta, A_log, dt_bias, aqk, akk,
             q_rstd, k_rstd, beta_eff,
@@ -177,6 +366,7 @@ class ChunkKDAFunction(torch.autograd.Function):
             None,
             None,
             None,
+            None,  # cp_context
         )
 
 
@@ -198,11 +388,15 @@ def ascendc_chunk_kda(
     safe_gate: bool = False,
     lower_bound: float | None = None,
     cu_seqlens: torch.Tensor | None = None,
+    cp_context: Any | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
     """Run KDA on [B,T,C] Q/K/V inputs and return time-major output.
 
     A2/A3 training requires BF16 Q/K/V, safe gate computed in the kernel,
     equal Q/K/V head counts, K=V=128, and no state gradients.
+
+    ``cp_context`` selects the context-parallel leg, which runs the
+    three-stage operators because the fused backward rejects ``dht``.
     """
     if not safe_gate:
         raise NotImplementedError(
@@ -256,6 +450,7 @@ def ascendc_chunk_kda(
         use_qk_l2norm_in_kernel,
         use_beta_sigmoid_in_kernel,
         torch.is_grad_enabled(),
+        cp_context,
     )
     return output, final_state
 
@@ -297,6 +492,7 @@ class AscendCKDA(OpImpl):
         safe_gate: bool = False,
         lower_bound: float | None = None,
         cu_seqlens: torch.Tensor | None = None,
+        cp_context: Any | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         return ascendc_chunk_kda(
             q=q,
@@ -315,4 +511,5 @@ class AscendCKDA(OpImpl):
             safe_gate=safe_gate,
             lower_bound=lower_bound,
             cu_seqlens=cu_seqlens,
+            cp_context=cp_context,
         )
