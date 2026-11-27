@@ -1,0 +1,38 @@
+src/torchturbo/ops/providers/npu/kda.py
+  s_1d3139c5945dab::t_38c2be338b2d02 97-121,135-139,145-161,164-167,171-176,178-181,184-195,198-211
+  s_1d3139c5945dab::t_9667d94916b89e 122-133
+  s_1d3139c5945dab::t_6fd858b3a9a3b4 391,397-399
+  s_1d3139c5945dab::t_c75fc296638eea 233,235-240
+  s_1d3139c5945dab::t_821f6493b87427 55-59,64-66
+  s_1d3139c5945dab::t_6fc54c0f9ecd63 182-183
+  s_1d3139c5945dab::t_20e5bddfd76f9e 162-163
+  s_1d3139c5945dab::t_7efe314c04c400 369
+  s_1d3139c5945dab::t_cd9e02f13c8974 140-144
+  s_1d3139c5945dab::t_c6daf4fb97dc56 134
+  s_1d3139c5945dab::t_a708dd3d1b83c2 323-326
+  s_1d3139c5945dab::t_89dde04f2122a2 514
+  s_1d3139c5945dab::t_6a989894d52d37 62-63,67-68
+  s_1d3139c5945dab::t_578c6a029d1f61 453
+  s_1d3139c5945dab::t_2dede53de5a031 32-54,60-61,69-96
+  s_1d3139c5945dab::t_8bbd2fede4bc2b 196-197
+  s_1d3139c5945dab::t_4ed2eb18113308 168-170,177
+  s_1d3139c5945dab::t_00f273b5504f44 495
+src/torchturbo/ops/providers/npu/kda_cp.py
+  s_1d3139c5945dab::t_aa8ae5886f9c4c 1-152
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "37b178a47d252e8d930fc4f4a6c08402a920d6d9",
+  "prompts": {},
+  "sessions": {
+    "s_1d3139c5945dab": {
+      "agent_id": {
+        "tool": "codefuse",
+        "id": "ea8d7361-7ea0-4c19-90f2-cb54176251e3",
+        "model": "codefuse_official_channel/DeepSeek-V4.1-Flash-1017"
+      },
+      "human_author": "Chenxi Qian <chenxi.qian.cq@outlook.com>"
+    }
+  }
+}
