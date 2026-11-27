@@ -1,0 +1,38 @@
+src/torchturbo/ops/dispatcher.py
+  s_1d3139c5945dab::t_87ec90c98703be 457
+  s_1d3139c5945dab::t_34857066b04f2b 431,434-438
+src/torchturbo/parallel/fsdp.py
+  s_1d3139c5945dab::t_6125f3f1ebd99c 126-129,138-139,143-147
+src/torchturbo/models/bailing_hybrid/attention.py
+  s_1d3139c5945dab::t_befae24a043810 138,145,152,167,181,194,207,223,257,273
+  s_1d3139c5945dab::t_e26b5771a7b32e 49-55,58,64-65
+  s_1d3139c5945dab::t_90808fadd3561e 28
+  s_1d3139c5945dab::t_f10024a22a2f4b 254
+  s_1d3139c5945dab::t_09261064770ef8 114-132
+src/torchturbo/engine/args.py
+  s_1d3139c5945dab::t_5132e569c1c94e 326-337
+  s_1d3139c5945dab::t_bda60f08ad9744 325
+src/torchturbo/engine/backends/fsdp2/backend.py
+  s_1d3139c5945dab::t_60cefc676c0b8a 163-164
+  s_1d3139c5945dab::t_975a3128609d4a 1352-1353,1363-1364,1367-1373
+  s_1d3139c5945dab::t_ccf4b03d12594a 456-457
+src/torchturbo/models/bailing_hybrid/model.py
+  s_1d3139c5945dab::t_5c33e6eecd3127 60
+  s_1d3139c5945dab::t_484e122df1e88c 72-74,77-79,83-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8a2883aef661ff72c3bbb3aaec0dfe84b4ae17f8",
+  "prompts": {},
+  "sessions": {
+    "s_1d3139c5945dab": {
+      "agent_id": {
+        "tool": "codefuse",
+        "id": "ea8d7361-7ea0-4c19-90f2-cb54176251e3",
+        "model": "codefuse_official_channel/DeepSeek-V4.1-Flash-1017"
+      },
+      "human_author": "Chenxi Qian <chenxi.qian.cq@outlook.com>"
+    }
+  }
+}
