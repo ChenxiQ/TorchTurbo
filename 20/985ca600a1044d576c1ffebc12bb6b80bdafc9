@@ -1,0 +1,19 @@
+src/torchturbo/ops/providers/npu/kda.py
+  s_1d3139c5945dab::t_c6daf4fb97dc56 122-129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "20985ca600a1044d576c1ffebc12bb6b80bdafc9",
+  "prompts": {},
+  "sessions": {
+    "s_1d3139c5945dab": {
+      "agent_id": {
+        "tool": "codefuse",
+        "id": "ea8d7361-7ea0-4c19-90f2-cb54176251e3",
+        "model": "codefuse_official_channel/DeepSeek-V4.1-Flash-1017"
+      },
+      "human_author": "Chenxi Qian <chenxi.qian.cq@outlook.com>"
+    }
+  }
+}
