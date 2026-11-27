@@ -169,6 +169,7 @@ class TorchTurboArgs:
     optimizer_name: str | None = None
     use_deterministic_algorithms: bool = False
     sp_size: int | None = None
+    use_fla_kcp_ascend: bool | None = None
     ep_size: int | None = None
     gbs: int | None = None
     gradient_checkpointing: bool = True
