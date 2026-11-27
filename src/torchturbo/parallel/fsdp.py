@@ -123,6 +123,10 @@ class FSDPParallelPlan(ParallelPlan):
         Expert Parallelism group size.
     tp_size:
         Tensor Parallelism group size.
+    use_fla_kcp:
+        Whether to use FLA's context-parallel KDA backend.
+    use_fla_kcp_ascend:
+        Whether to use AscendC AllGather KCP; mutually exclusive with use_fla_kcp.
     """
 
     plan: dict[str, FSDPPlacementSpec | FSDPPlanSpec | Any] = field(
@@ -131,9 +135,16 @@ class FSDPParallelPlan(ParallelPlan):
     sp_size: int = 1
     ep_size: int = 1
     tp_size: int = 1
+    use_fla_kcp: bool = False
+    use_fla_kcp_ascend: bool = False
 
     def __post_init__(self) -> None:
         """Normalize plan values to FSDPPlanSpec/FSDPPlacementSpec."""
+        if self.use_fla_kcp and self.use_fla_kcp_ascend:
+            raise ValueError(
+                "use_fla_kcp and use_fla_kcp_ascend select different CP "
+                "backends; enable only one."
+            )
         for k, v in list(self.plan.items()):
             if isinstance(v, tuple) and len(v) == 2:
                 self.plan[k] = FSDPPlanSpec(

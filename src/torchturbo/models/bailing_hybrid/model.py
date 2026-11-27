@@ -57,6 +57,7 @@ class TurboBailingMoeV3ForCausalLM(TurboModel, BailingMoeV3ForCausalLM):
         sp_group = sp_info["sp_group"]
         sp_size = sp_info["sp_size"]
         sp_rank = sp_info["sp_rank"]
+        use_fla_kcp_ascend = sp_info.get("use_fla_kcp_ascend", False)
         assert sp_size >= 1, "must be"
 
         if self.config._attn_implementation != "flash_attention_2":
@@ -68,14 +69,21 @@ class TurboBailingMoeV3ForCausalLM(TurboModel, BailingMoeV3ForCausalLM):
         # MLA layers dispatch through the registered turbo_ulysses interface;
         # KDA layers rewrite their forward instead.
         self.register_sp_attention_interface(sp_info)
-        self.patch_kda_forward(sp_group, sp_size, sp_rank)
+        self.patch_kda_forward(
+            sp_group, sp_size, sp_rank, use_fla_kcp_ascend,
+        )
 
     @classmethod
-    def patch_kda_forward(cls, sp_group, sp_size, sp_rank):
+    def patch_kda_forward(
+        cls, sp_group, sp_size, sp_rank, use_fla_kcp_ascend=False,
+    ):
         from .attention import patch_kda_forward as install_kda_forward
         from .modeling_bailing_moe_v3 import BailingMoeV3KimiDeltaAttention
 
-        install_kda_forward(BailingMoeV3KimiDeltaAttention, sp_group, sp_size, sp_rank)
+        install_kda_forward(
+            BailingMoeV3KimiDeltaAttention, sp_group, sp_size, sp_rank,
+            use_fla_kcp_ascend=use_fla_kcp_ascend,
+        )
 
     @staticmethod
     def _pre_init_patches(config):

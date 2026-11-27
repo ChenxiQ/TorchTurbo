@@ -323,6 +323,19 @@ _TURBO_ARG_SPECS: tuple[TurboArgSpec, ...] = (
         help="Sequence parallelism group size. Replaces TORCH_TURBO_SP_SIZE.",
     ),
     TurboArgSpec(
+        name="use_fla_kcp_ascend",
+        args_name="use_fla_kcp_ascend",
+        cli_name="--tt_use_fla_kcp_ascend",
+        env_name="TORCH_TURBO_USE_FLA_KCP_ASCEND",
+        config_path="parallel_plan.use_fla_kcp_ascend",
+        type=string_to_bool,
+        metavar="BOOL",
+        help=(
+            "Use AscendC AllGather KCP instead of Ulysses All2All when "
+            "sp_size > 1. The two are mutually exclusive."
+        ),
+    ),
+    TurboArgSpec(
         name="ep_size",
         args_name="ep_size",
         cli_name="--tt_ep_size",

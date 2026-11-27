@@ -25,6 +25,7 @@ def patch_kda_forward(
     sp_group: ProcessGroup | None,
     sp_size: int,
     sp_rank: int,
+    use_fla_kcp_ascend: bool = False,
 ) -> None:
     """Install packed KDA training with sequence gathering and head sharding.
 
@@ -45,15 +46,23 @@ def patch_kda_forward(
     from torchturbo.ops import ops
     from torchturbo.ops.packed_params import get_packed_params
 
+    # KCP replaces the Ulysses All2All entirely: every rank keeps all heads
+    # and owns one contiguous token shard, exchanging recurrent states inside
+    # the KDA operator instead of reshuffling q/k/v.
+    use_ascendc_cp = use_fla_kcp_ascend and sp_size > 1
+    if use_ascendc_cp:
+        from torchturbo.ops.providers.npu.kda_cp import KDAContextParallel
+
     a2a_stream = None
     qkv_events = None
-    if sp_size > 1:
+    if sp_size > 1 and not use_ascendc_cp:
         device_runtime = get_device_runtime()
         a2a_stream = device_runtime.new_stream()
         qkv_events = [device_runtime.new_event() for _ in range(3)]
 
     def get_parameter_local_cp(weight: torch.Tensor, dim: int) -> torch.Tensor:
-        if sp_size == 1:
+        # KCP keeps every head, so convolutions use the full parameter.
+        if sp_size == 1 or use_ascendc_cp:
             return weight
 
         slices = [slice(None)] * weight.dim()
@@ -102,26 +111,45 @@ def patch_kda_forward(
         if packed_params is not None:
             cu_seqlens = packed_params.cu_seqlens
 
+        # KCP: this rank owns q_len tokens of the global packed stream and
+        # keeps every head, so hand the operator this shard's boundaries and
+        # let it exchange recurrent states across ranks itself.
+        cp_context = None
+        if use_ascendc_cp:
+            if self.num_heads % sp_size:
+                raise ValueError(
+                    "KDA CP requires num_heads divisible by sp_size, got "
+                    f"{self.num_heads} and {sp_size}."
+                )
+            offsets = (
+                packed_params.cu_seqlens_list if packed_params is not None
+                else [0, q_len * sp_size]
+            )
+            cp_context = KDAContextParallel.from_global_offsets(
+                offsets, q_len, sp_group,
+            )
+            cu_seqlens = torch.tensor(cp_context.cu_seqlens, dtype=torch.int64)
+
         # Each gather launches right after its projection so the exchanges
         # pipeline against the remaining projections and convolutions; the
         # event recorded behind a gather marks its completion, and only its
         # convolution waits on it.
         q = self.q_proj(hidden_states)
-        if sp_size > 1:
+        if sp_size > 1 and not use_ascendc_cp:
             q = gather_seq_scatter_heads(
                 q, seq_dim=1, head_dim=2, sp_group=sp_group, sp_size=sp_size,
                 a2a_stream=a2a_stream,
             )
             qkv_events[0].record(a2a_stream)
         k = self.k_proj(hidden_states)
-        if sp_size > 1:
+        if sp_size > 1 and not use_ascendc_cp:
             k = gather_seq_scatter_heads(
                 k, seq_dim=1, head_dim=2, sp_group=sp_group, sp_size=sp_size,
                 a2a_stream=a2a_stream,
             )
             qkv_events[1].record(a2a_stream)
         v = self.v_proj(hidden_states)
-        if sp_size > 1:
+        if sp_size > 1 and not use_ascendc_cp:
             v = gather_seq_scatter_heads(
                 v, seq_dim=1, head_dim=2, sp_group=sp_group, sp_size=sp_size,
                 a2a_stream=a2a_stream,
@@ -136,7 +164,7 @@ def patch_kda_forward(
         else:
             g = self.f_b_proj(self.f_a_proj(hidden_states))
         beta = self.b_proj(hidden_states).float()
-        if sp_size > 1:
+        if sp_size > 1 and not use_ascendc_cp:
             # Launched before the convolutions so these small exchanges
             # finish while the convolutions run; the wait at the chunk
             # consumer below covers them.
@@ -150,7 +178,7 @@ def patch_kda_forward(
             )
 
         # Every convolution must reset at the same boundaries as recurrent KDA.
-        if sp_size > 1:
+        if sp_size > 1 and not use_ascendc_cp:
             get_device_runtime().current_stream().wait_event(qkv_events[0])
         q, _ = ops.causal_conv1d(
             x=q,
@@ -163,7 +191,7 @@ def patch_kda_forward(
             output_final_state=False,
             packed_params=packed_params,
         )
-        if sp_size > 1:
+        if sp_size > 1 and not use_ascendc_cp:
             get_device_runtime().current_stream().wait_event(qkv_events[1])
         k, _ = ops.causal_conv1d(
             x=k,
@@ -176,7 +204,7 @@ def patch_kda_forward(
             output_final_state=False,
             packed_params=packed_params,
         )
-        if sp_size > 1:
+        if sp_size > 1 and not use_ascendc_cp:
             get_device_runtime().current_stream().wait_event(qkv_events[2])
         v, _ = ops.causal_conv1d(
             x=v,
@@ -192,7 +220,7 @@ def patch_kda_forward(
 
         g = g.unflatten(-1, (-1, self.head_dim))
 
-        if sp_size > 1:
+        if sp_size > 1 and not use_ascendc_cp:
             # Covers the gate/beta gathers trailing the QKV ones on the
             # shared stream.
             get_device_runtime().current_stream().wait_stream(a2a_stream)
@@ -223,9 +251,10 @@ def patch_kda_forward(
             safe_gate=self.safe_gate,
             lower_bound=self.lower_bound,
             cu_seqlens=cu_seqlens,
+            cp_context=cp_context,
         )
 
-        if sp_size > 1:
+        if sp_size > 1 and not use_ascendc_cp:
             # o: [B, T, H/sp, V] -> [B, T/sp, H, V]. The scatter runs on
             # the shared a2a stream; the gather-side exchanges return
             # contiguous views, but this scattered layout needs an extra
@@ -241,7 +270,7 @@ def patch_kda_forward(
         else:
             g = self.g_b_proj(self.g_a_proj(hidden_states))
         g = g.unflatten(-1, (-1, self.head_dim))
-        if sp_size > 1:
+        if sp_size > 1 and not use_ascendc_cp:
             get_device_runtime().current_stream().wait_stream(a2a_stream)
         self.o_norm.forward = norm_forward.__get__(self.o_norm)
         o = self.o_norm(o, g)

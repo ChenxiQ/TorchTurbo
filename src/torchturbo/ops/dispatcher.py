@@ -428,9 +428,14 @@ class OpDispatcher:
         safe_gate: bool = False,
         lower_bound: float | None = None,
         cu_seqlens: torch.Tensor | None = None,
+        cp_context: Any | None = None,
         impl: str | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
-        """Run KDA on [B,T,C] Q/K/V inputs and return [B,T,H,Dv]."""
+        """Run KDA on [B,T,C] Q/K/V inputs and return [B,T,H,Dv].
+
+        ``cp_context`` selects the context-parallel leg; only the AscendC
+        provider honours it, and only when it is not None.
+        """
         return self._dispatch(
             "kda",
             q,
@@ -449,6 +454,7 @@ class OpDispatcher:
             safe_gate=safe_gate,
             lower_bound=lower_bound,
             cu_seqlens=cu_seqlens,
+            cp_context=cp_context,
             impl=impl,
         )
 
